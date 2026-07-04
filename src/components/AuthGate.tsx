@@ -7,6 +7,12 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
+// Dev-mode bypass: if Supabase is not configured (placeholder URL), skip the
+// auth gate so the dashboard is accessible during local development.  Auth
+// remains enforced in production where a real Supabase project is configured.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://your-project-ref.supabase.co";
+const IS_DEV_MODE = SUPABASE_URL.includes("your-project-ref");
+
 interface AuthGateProps {
   children: React.ReactNode;
 }
@@ -55,7 +61,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     }
   };
 
-  if (loading) {
+  if (loading && !IS_DEV_MODE) {
     return (
       <div className="tq-auth-loading">
         <div className="tq-spinner" />
@@ -64,7 +70,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     );
   }
 
-  if (!session) {
+  if (!session && !IS_DEV_MODE) {
     return (
       <div className="tq-auth-gate">
         <div className="tq-auth-card">
