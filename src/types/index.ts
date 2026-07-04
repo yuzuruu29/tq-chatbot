@@ -32,6 +32,8 @@ export type Signals = {
   model_proposed_score?: LeadScore;
   /** Human-readable business type captured from context-aware extraction. */
   business_type_text?: string;
+  /** Human-readable problem/pain captured from context-aware extraction. */
+  problem_text?: string;
 };
 
 export type ScoringResult = {

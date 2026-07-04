@@ -19,7 +19,7 @@ function getAnonKey(): string {
 }
 
 interface EdgePayload {
-  action: "create_session" | "create_message" | "create_lead" | "record_event";
+  action: "create_session" | "create_message" | "create_lead" | "record_event" | "process_message";
   session_id?: string;
   visitor_id?: string;
   tenant_id: string;
@@ -33,6 +33,42 @@ interface EdgePayload {
   scoring_result?: Record<string, unknown>;
   event_type?: string;
   data?: Record<string, unknown>;
+  // process_message fields
+  conversation_history?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  current_signals?: Record<string, unknown>;
+  last_question_purpose?: string | null;
+  tenant_config?: Record<string, unknown>;
+  deterministic_decision?: {
+    next_gap: string | null;
+    final_score: string;
+    route: string;
+    business_type_text?: string;
+    problem_text?: string;
+    next_action: string;
+  };
+}
+
+interface GroqExtractedSignals {
+  has_business: boolean | null;
+  business_type_text: string | null;
+  business_name: string | null;
+  problem_clarity: 0 | 1 | 2 | null;
+  problem_text: string | null;
+  urgency: 0 | 1 | 2 | null;
+  wants_to_book: boolean | null;
+  has_traffic_or_spend: boolean | null;
+  manual_sales_signal: boolean | null;
+  budget_signal: boolean | null;
+  contact_captured: boolean | null;
+  email: string | null;
+  refusal_detected: boolean;
+  confidence: number;
+}
+
+interface ProcessMessageResponse {
+  groq_available: boolean;
+  extracted_signals: GroqExtractedSignals | null;
+  drafted_response: string | null;
 }
 
 interface EdgeResponse {
@@ -45,6 +81,10 @@ interface EdgeResponse {
   message?: ChatMessage;
   lead?: Lead;
   event?: FunnelEvent;
+  // process_message response fields
+  groq_available?: boolean;
+  extracted_signals?: GroqExtractedSignals | null;
+  drafted_response?: string | null;
 }
 
 /**
@@ -182,6 +222,48 @@ export async function edgeRecordEvent(
     lead_id: leadId,
   });
   return result?.event || null;
+}
+
+/**
+ * Request Groq-assisted signal extraction and response drafting from the Edge Function.
+ * Returns { groq_available, extracted_signals, drafted_response } or null for fallback.
+ *
+ * This is an optional enhancement — the browser always runs deterministic
+ * extraction first, then merges Groq suggestions when available.
+ * Groq NEVER decides final score or route.
+ */
+export async function edgeProcessMessage(
+  tenantId: string,
+  content: string,
+  conversationHistory: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  currentSignals: Record<string, unknown>,
+  lastQuestionPurpose: string | null,
+  tenantConfig: Record<string, unknown>,
+  deterministicDecision: {
+    next_gap: string | null;
+    final_score: string;
+    route: string;
+    business_type_text?: string;
+    problem_text?: string;
+    next_action: string;
+  }
+): Promise<ProcessMessageResponse | null> {
+  const result = await callChatApi({
+    action: "process_message",
+    tenant_id: tenantId,
+    content,
+    conversation_history: conversationHistory,
+    current_signals: currentSignals,
+    last_question_purpose: lastQuestionPurpose,
+    tenant_config: tenantConfig,
+    deterministic_decision: deterministicDecision,
+  });
+  if (!result) return null;
+  return {
+    groq_available: result.groq_available ?? false,
+    extracted_signals: result.extracted_signals ?? null,
+    drafted_response: result.drafted_response ?? null,
+  };
 }
 
 /**

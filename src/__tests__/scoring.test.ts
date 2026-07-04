@@ -2,7 +2,7 @@
 // These tests verify the deterministic scoring function works as expected
 
 import { describe, it, expect } from "vitest";
-import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap, extractEmail, isValidEmail, extractBusinessName, isLikelyBusinessType, extractBusinessTypeFromContext } from "../lib/scoring";
+import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap, extractEmail, isValidEmail, extractBusinessName, isLikelyBusinessType, extractBusinessTypeFromContext, extractPainFromContext } from "../lib/scoring";
 import type { Signals } from "../types";
 
 // Test Scenario 1: Hot Lead
@@ -52,8 +52,8 @@ describe("Scoring Scenarios - Warm Lead", () => {
     // Expected signals
     expect(extractedSignals.has_business).toBe(true); // "I have a small service business"
     expect(extractedSignals.problem_clarity).toBe(1); // "funnel is weak" - some problem
-    expect(extractedSignals.urgency).toBe(0); // "not sure about timing" - no urgency
-    expect(extractedSignals.wants_to_book).toBe(false); // No booking intent
+    expect(extractedSignals.urgency).toBeUndefined(); // "not sure about timing" - no urgency detected
+    expect(extractedSignals.wants_to_book).toBeUndefined(); // No booking intent detected
     
     // Create full signals object
     const signals: Signals = mergeSignals(defaultSignals, extractedSignals);
@@ -81,12 +81,12 @@ describe("Scoring Scenarios - Tyre-kicker", () => {
     // Extract signals from input
     const extractedSignals = extractSignalsFromText(input);
     
-    // Expected signals - should be all defaults (false/0)
-    expect(extractedSignals.has_business).toBe(false);
-    expect(extractedSignals.has_traffic_or_spend).toBe(false);
-    expect(extractedSignals.problem_clarity).toBe(0);
-    expect(extractedSignals.urgency).toBe(0);
-    expect(extractedSignals.wants_to_book).toBe(false);
+    // Expected signals - should be empty (no positive matches)
+    expect(extractedSignals.has_business).toBeUndefined();
+    expect(extractedSignals.has_traffic_or_spend).toBeUndefined();
+    expect(extractedSignals.problem_clarity).toBeUndefined();
+    expect(extractedSignals.urgency).toBeUndefined();
+    expect(extractedSignals.wants_to_book).toBeUndefined();
     
     // Create full signals object
     const signals: Signals = mergeSignals(defaultSignals, extractedSignals);
@@ -114,7 +114,7 @@ describe("Scoring Scenarios - Soft Booking", () => {
     const extractedSignals = extractSignalsFromText(input);
     
     // Expected signals
-    expect(extractedSignals.has_business).toBe(false); // No business mentioned
+    expect(extractedSignals.has_business).toBeUndefined(); // No business mentioned (not detected)
     expect(extractedSignals.wants_to_book).toBe(true); // "book a call"
     
     // Create full signals object
@@ -268,7 +268,7 @@ describe("Signal Extraction Edge Cases", () => {
       expect(signals.urgency, `Failed for: "${phrase}"`).toBe(2);
     });
 
-    // Test phrases that should have 0 urgency
+    // Test phrases that should have no urgency detected (undefined, not 0)
     const noUrgencyPhrases = [
       "Can we do this next week?",
       "I'm just browsing",
@@ -277,7 +277,7 @@ describe("Signal Extraction Edge Cases", () => {
     
     noUrgencyPhrases.forEach(phrase => {
       const signals = extractSignalsFromText(phrase);
-      expect(signals.urgency, `Failed for: "${phrase}"`).toBe(0);
+      expect(signals.urgency, `Failed for: "${phrase}"`).toBeUndefined();
     });
   });
 
@@ -313,15 +313,15 @@ describe("Signal Merging", () => {
     };
     
     const extracted: Partial<Signals> = {
-      has_business: false, // Extracted value
+      // has_business not in extracted → existing true is preserved
       has_traffic_or_spend: true, // Should update existing
       problem_clarity: 2 // Should update existing
     };
     
     const merged = mergeSignals(existing, extracted);
     
-    // Extracted signals should update existing ones
-    expect(merged.has_business).toBe(false); // Extracted value
+    // has_business preserved because extracted has no opinion (undefined)
+    expect(merged.has_business).toBe(true);
     expect(merged.has_traffic_or_spend).toBe(true); // Extracted updates
     expect(merged.problem_clarity).toBe(2); // Extracted updates
     expect(merged.urgency).toBe(0); // Existing unchanged (not in extracted)
@@ -738,5 +738,206 @@ describe("Regression - Short Business Answers", () => {
       const merged = mergeSignals(defaultSignals, signals!);
       expect(getQualificationGap(merged), `Gap should be pain for "${biz}"`).toBe("pain");
     });
+  });
+});
+
+// ====================================================================
+// Regression: Qualification Loop Bug (2026-07-05)
+//
+// The bot was looping back to the business question after the user
+// answered the pain question.  Root cause: extractSignalsFromText()
+// returned explicit false for has_business on a pain answer like
+// "Getting leads, customers", and mergeSignals() overwrote the prior
+// true with false.  These tests prevent that regression.
+// ====================================================================
+
+describe("Regression - Qualification Loop Bug", () => {
+  it("should preserve has_business=true after a pain answer that does not mention business", () => {
+    // Simulate: business captured, then user answers pain question
+    const existing: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      business_type_text: "Fried Chicken Restaurants"
+    };
+
+    // "Getting leads, customers" does not re-state business context
+    const extracted = extractSignalsFromText("Getting leads, customers");
+    const merged = mergeSignals(existing, extracted);
+
+    // The critical invariant: has_business must remain true
+    expect(merged.has_business).toBe(true);
+    expect(merged.business_type_text).toBe("Fried Chicken Restaurants");
+  });
+
+  it("should NOT overwrite has_business=true with false from a pain answer", () => {
+    // Old bug: extraction returned { has_business: false } for pain answers
+    // that didn't contain business keywords, and merge overwrote true→false.
+    // New behavior: extraction returns only positively detected fields.
+    const existing: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      business_type_text: "Fried Chicken Restaurants"
+    };
+
+    const extracted = extractSignalsFromText("Getting leads, customers");
+
+    // Key check: extraction must NOT return has_business: false
+    expect(extracted.has_business).toBeUndefined();
+
+    const merged = mergeSignals(existing, extracted);
+    expect(merged.has_business).toBe(true);
+  });
+
+  it("should advance to pain gap after business is captured", () => {
+    const contextSignals = extractBusinessTypeFromContext("Fried Chicken Restaurants")!;
+    const merged = mergeSignals(defaultSignals, contextSignals);
+
+    // After capturing business, gap should be pain — not business
+    expect(merged.has_business).toBe(true);
+    expect(merged.business_type_text).toBe("Fried Chicken Restaurants");
+    expect(getQualificationGap(merged)).toBe("pain");
+  });
+
+  it("should advance past pain gap after pain answer is received", () => {
+    // Simulate full flow: business → pain
+    let signals = mergeSignals(defaultSignals, extractBusinessTypeFromContext("Fried Chicken Restaurants")!);
+    expect(getQualificationGap(signals)).toBe("pain");
+
+    // User answers pain: "Getting leads, customers"
+    const painExtracted = extractSignalsFromText("Getting leads, customers");
+    signals = mergeSignals(signals, painExtracted);
+
+    // With the merge fix, has_business is preserved and pain is detected
+    expect(signals.has_business).toBe(true);
+    expect(signals.business_type_text).toBe("Fried Chicken Restaurants");
+    // problem_clarity should be >= 1 (either from extraction or context)
+    // Note: "getting leads, customers" may not match problem patterns directly,
+    // but context-aware extraction should handle it
+    expect(getQualificationGap(signals)).not.toBe("business");
+  });
+
+  it("should detect pain from context-aware extraction for short answers", () => {
+    const painSignals = extractPainFromContext("Getting leads, customers");
+    expect(painSignals).not.toBeNull();
+    expect(painSignals!.problem_clarity).toBeGreaterThanOrEqual(1);
+    expect(painSignals!.problem_text).toBe("Getting leads, customers");
+  });
+
+  it("should detect pain from various short growth answers", () => {
+    const painAnswers = [
+      "getting leads",
+      "getting leads, customers",
+      "more customers",
+      "more walk-ins",
+      "online orders",
+      "faster replies",
+      "missed inquiries",
+      "lead quality",
+      "follow-up speed",
+      "conversion rates",
+      "more bookings",
+      "more sales",
+      "customer acquisition",
+      "low sales",
+      "not enough customers",
+    ];
+
+    painAnswers.forEach(answer => {
+      const signals = extractPainFromContext(answer);
+      expect(signals, `Should detect pain for: "${answer}"`).not.toBeNull();
+      expect(signals!.problem_clarity, `problem_clarity for "${answer}"`).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("should NOT detect pain from greetings or refusals", () => {
+    const nonPainAnswers = [
+      "hello",
+      "yes",
+      "no",
+      "idk",
+      "I don't want to say",
+      "what do you mean?",
+    ];
+
+    nonPainAnswers.forEach(answer => {
+      const signals = extractPainFromContext(answer);
+      expect(signals, `Should NOT detect pain for: "${answer}"`).toBeNull();
+    });
+  });
+
+  it("full scenario: business → pain → no loop back to business", () => {
+    // This is the exact scenario from the bug report:
+    // Bot: "What kind of business are you running?"
+    // User: "Fried Chicken Restaurants"
+    // Bot: "What is the specific challenge?"
+    // User: "Getting leads, customers"
+    // Expected: bot does NOT ask business again
+
+    // Step 1: User says "Fried Chicken Restaurants"
+    let signals = mergeSignals(defaultSignals, extractBusinessTypeFromContext("Fried Chicken Restaurants")!);
+    expect(signals.has_business).toBe(true);
+    expect(signals.business_type_text).toBe("Fried Chicken Restaurants");
+    expect(getQualificationGap(signals)).toBe("pain");
+
+    // Step 2: User says "Getting leads, customers"
+    const extracted = extractSignalsFromText("Getting leads, customers");
+    const painFromContext = extractPainFromContext("Getting leads, customers");
+    let mergedExtracted = { ...extracted };
+    if (painFromContext) {
+      mergedExtracted = { ...mergedExtracted, ...painFromContext };
+    }
+    signals = mergeSignals(signals, mergedExtracted);
+
+    // Critical assertions
+    expect(signals.has_business).toBe(true); // Business preserved!
+    expect(signals.business_type_text).toBe("Fried Chicken Restaurants"); // Type preserved!
+    expect(signals.problem_clarity).toBeGreaterThanOrEqual(1); // Pain detected!
+    expect(getQualificationGap(signals)).not.toBe("business"); // No loop!
+  });
+
+  it("refusal should not fabricate pain", () => {
+    const painSignals = extractPainFromContext("I don't want to say");
+    expect(painSignals).toBeNull();
+  });
+
+  it("extraction returns empty object for messages with no detectable signals", () => {
+    const extracted = extractSignalsFromText("Just a random comment");
+    // With the fix, only positively detected fields are returned
+    expect(extracted.has_business).toBeUndefined();
+    expect(extracted.has_traffic_or_spend).toBeUndefined();
+    expect(extracted.problem_clarity).toBeUndefined();
+    expect(extracted.urgency).toBeUndefined();
+    expect(extracted.wants_to_book).toBeUndefined();
+    expect(extracted.manual_sales_signal).toBeUndefined();
+    expect(extracted.budget_signal).toBeUndefined();
+  });
+
+  it("extraction returns only positively detected fields, not default false/0", () => {
+    // "I run a business" should detect has_business but NOT set urgency/problem
+    const extracted = extractSignalsFromText("I run a business");
+    expect(extracted.has_business).toBe(true);
+    // These should be undefined (not false/0) because the message
+    // does not contain evidence for them
+    expect(extracted.has_traffic_or_spend).toBeUndefined();
+    expect(extracted.wants_to_book).toBeUndefined();
+  });
+
+  it("problem_text should be captured from context-aware pain extraction", () => {
+    const signals = extractPainFromContext("more customers");
+    expect(signals).not.toBeNull();
+    expect(signals!.problem_text).toBe("more customers");
+  });
+
+  it("problem_text should surface in scoring summary", () => {
+    const existing: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      business_type_text: "Fried Chicken Restaurants"
+    };
+    const painSignals = extractPainFromContext("Getting leads, customers")!;
+    const merged = mergeSignals(existing, painSignals);
+    const result = scoreLead(merged);
+    expect(result.summary).toBeDefined();
+    expect(result.summary!.pain_point).toBe("Getting leads, customers");
   });
 });

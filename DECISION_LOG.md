@@ -585,6 +585,10 @@ None of the original launch blockers remain. The following are production harden
 | 2026-07-05 | Edge Function tenant validation + payload guards | ✅ Complete |
 | 2026-07-05 | Edge Function timeout (10s abort) | ✅ Complete |
 | 2026-07-05 | Graceful failure: .catch() on persistence calls | ✅ Complete |
+| 2026-07-05 | Fix qualification loop — merge bug + context-aware pain | ✅ Complete |
+| 2026-07-05 | Groq provider (server-side only, optional) | ✅ Complete |
+| 2026-07-05 | Gap-based lastQuestionPurpose (replaces regex) | ✅ Complete |
+| 2026-07-05 | 16 loop regression tests | ✅ Complete |
 
 ---
 
@@ -782,5 +786,89 @@ routing, and continued qualification for medium-score leads.
 
 ---
 
+## Qualification Loop Bug Fix (2026-07-05)
+
+### 35. Deterministic Signal Merge Fix
+**Decision**: `extractSignalsFromText()` returns only positively detected fields, not explicit `false`/`0` defaults.
+**Rationale**:
+- The old pattern returned `{ has_business: false, urgency: 0, ... }` for every message
+- `mergeSignals()` saw `false !== undefined` and overwrote prior `true` with `false`
+- This caused the bot to loop back to the business question after a pain answer
+- New pattern: only return fields with positive evidence. `undefined` means "no evidence" → merge preserves existing value
+
+**Root cause**: "Getting leads, customers" did not match business patterns → extraction returned `has_business: false` → merge overwrote `true` → gap became `"business"` → loop.
+
+**Fix**: Change `extractSignalsFromText()` to set boolean fields only when `true`, and numeric fields only when a positive match is found. Remove the `else { signals.problem_clarity = 0 }` and `else { signals.urgency = 0 }` branches.
+
+**Status**: ✅ Implemented
+
+### 36. Context-Aware Pain Extraction
+**Decision**: Add `extractPainFromContext(input)` helper for short pain/growth answers.
+**Rationale**:
+- Short answers like "getting leads", "more customers", "online orders" are valid pain responses
+- Standard `extractSignalsFromText()` does not match these (no "problem"/"issue" keywords)
+- `extractPainFromContext()` recognizes growth-oriented noun phrases and verb+object patterns
+- Called when `lastQuestionPurpose === "pain"` and standard extraction found no pain
+
+**Accepted patterns**: getting leads, more customers, more walk-ins, online orders, faster replies, missed inquiries, lead quality, follow-up speed, conversion rates, more bookings, more sales, customer acquisition, low sales, not enough customers
+
+**Rejected patterns**: hello, yes, no, idk, I don't want to say, what do you mean?
+
+**Status**: ✅ Implemented
+
+### 37. Groq Provider (Server-Side Only)
+**Decision**: Add Groq as an optional server-side provider for structured extraction and response drafting.
+**Rationale**:
+- Groq can extract signals from ambiguous messages that deterministic regex misses
+- Groq can draft more natural assistant responses
+- Groq is OPTIONAL — deterministic extraction and scoring remain the source of truth
+- Groq runs ONLY in the Edge Function (Deno runtime) — GROQ_API_KEY never reaches the browser
+- If Groq fails, times out, or returns invalid JSON, deterministic fallback is used
+
+**Security**:
+- GROQ_API_KEY read from `Deno.env` only — never `VITE_` prefixed
+- Edge Function `process_message` action calls Groq server-side
+- Browser calls Edge Function, never Groq directly
+- Groq suggestions are merged conservatively: only add positive signals, never overwrite deterministic positives with null
+
+**Integration**:
+- `supabase/functions/chat-api/groq.ts` — Groq provider module
+- Edge Function `process_message` action — optional Groq extraction + drafting
+- `edgeProcessMessage()` in `edgeClient.ts` — browser-side client
+- ChatWidget calls Groq asynchronously after deterministic response is generated
+
+**Status**: ✅ Implemented
+
+### 38. Gap-Based lastQuestionPurpose
+**Decision**: Derive `lastQuestionPurpose` from `getQualificationGap()` instead of regex on response text.
+**Rationale**:
+- Old approach used regex on the assistant response to detect what question was asked
+- Groq-drafted responses may not match the regex patterns
+- The `gap` variable already encodes the correct next question purpose
+- More reliable, works with both deterministic and Groq-drafted responses
+
+**Status**: ✅ Implemented
+
+---
+
+## What Is Production-Ready Now (updated)
+
+All previous items remain, plus:
+
+15. Deterministic signal merge fix — no more qualification loop
+16. Context-aware pain extraction for short growth answers
+17. Groq provider (optional, server-side only) for enhanced extraction and response drafting
+18. Gap-based conversation state tracking
+19. 16 new loop regression tests (112 total)
+
+## Remaining Risks and V1 Tradeoffs (updated)
+
+Previous items remain, plus:
+
+7. **Groq cost exposure**: Groq calls are bounded by Edge Function rate limiting and 7s timeout, but each call has a cost. Production should monitor Groq usage.
+8. **Groq response quality**: Groq-drafted responses override deterministic wording. If Groq produces poor responses, the fallback is to not set GROQ_API_KEY.
+
+---
+
 *Last Updated: 2026-07-05*
-*Version: 4.0.0*
+*Version: 5.0.0*

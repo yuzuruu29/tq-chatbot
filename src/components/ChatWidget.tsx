@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { ChatMessage, ChatSession, VisitorContext, Lead } from "../types";
 import { messageService } from "../services/messageService";
 import { leadService } from "../services/leadService";
-import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals, getQualificationGap, extractBusinessTypeFromContext } from "../lib/scoring";
+import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals, getQualificationGap, extractBusinessTypeFromContext, extractPainFromContext, getRouteConfig } from "../lib/scoring";
 import { calendlyService } from "../services/calendlyService";
 import { makeIdempotencyKey, idempotencyTracker, isSpamSubmission } from "../lib/idempotency";
 import { chatRateLimiter } from "../lib/rateLimit";
 import { getTenantConfig, type TenantConfig } from "../config/tenant";
+import { edgeProcessMessage } from "../lib/edgeClient";
 import { v4 as uuidv4 } from "uuid";
 
 // Persistence key for sessionStorage — scoped to visitor + tenant so
@@ -265,7 +266,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
         extractedSignals = { ...extractedSignals, ...contextSignals };
       }
     }
-    const updatedSignals = mergeSignals(state.signals, extractedSignals);
+    if (prevPurpose === "pain" && (!extractedSignals.problem_clarity || extractedSignals.problem_clarity < 1)) {
+      const painSignals = extractPainFromContext(content);
+      if (painSignals) {
+        extractedSignals = { ...extractedSignals, ...painSignals };
+      }
+    }
+    let updatedSignals = mergeSignals(state.signals, extractedSignals);
 
     if (updatedSignals.wants_to_book && !state.contactInfo.email) {
       setState(prev => ({
@@ -279,21 +286,91 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     }
 
     const scoringResult = scoreLead(updatedSignals);
-    const assistantResponse = generateCloserResponse(content, updatedSignals, scoringResult);
+    let assistantResponse = generateCloserResponse(content, updatedSignals, scoringResult);
 
     // Determine what question the response is asking so the NEXT user message
-    // can be interpreted in context.  This must happen AFTER generateCloserResponse
-    // because the response text depends on the updated signals.
-    let nextQuestionPurpose: ChatState["lastQuestionPurpose"] = null;
-    if (/what kind of business|tell me.*about your business/i.test(assistantResponse)) {
-      nextQuestionPurpose = "business";
-    } else if (/what.*(?:trying to improve|specific challenge|problem|pain)/i.test(assistantResponse)) {
-      nextQuestionPurpose = "pain";
-    } else if (/how urgent/i.test(assistantResponse)) {
-      nextQuestionPurpose = "urgency";
-    } else if (/current process|handling interested visitors/i.test(assistantResponse)) {
-      nextQuestionPurpose = "readiness";
-    }
+    // can be interpreted in context.  Derive from the qualification gap rather
+    // than brittle regex on the response text — this works regardless of whether
+    // the response was deterministic or Groq-drafted.
+    const gap = getQualificationGap(updatedSignals);
+    let nextQuestionPurpose: ChatState["lastQuestionPurpose"] = gap;
+
+    // Optional: call Groq for enhanced extraction and response drafting.
+    // This runs in the background — the deterministic response is used
+    // immediately.  If Groq returns a drafted response, it replaces the
+    // deterministic one.  If Groq returns additional signals, they are
+    // merged (but never overwrite positive deterministic signals with null).
+    const routeConfig = getRouteConfig(scoringResult.route);
+    edgeProcessMessage(
+      tenantId,
+      content,
+      state.messages.map(m => ({ role: m.role, content: m.content })),
+      updatedSignals,
+      prevPurpose,
+      config as unknown as Record<string, unknown>,
+      {
+        next_gap: gap,
+        final_score: scoringResult.final_score,
+        route: scoringResult.route,
+        business_type_text: updatedSignals.business_type_text,
+        problem_text: updatedSignals.problem_text,
+        next_action: routeConfig.description
+      }
+    ).then(groqResult => {
+      if (!groqResult) return;
+
+      // Merge Groq-extracted signals: only set fields that are non-null
+      // and that the deterministic extraction did not already positively detect.
+      if (groqResult.extracted_signals) {
+        const groqSignals: Partial<typeof defaultSignals> = {};
+        const gs = groqResult.extracted_signals;
+        if (gs.has_business === true && !updatedSignals.has_business) groqSignals.has_business = true;
+        if (gs.business_type_text && !updatedSignals.business_type_text) groqSignals.business_type_text = gs.business_type_text;
+        if (gs.problem_clarity != null && gs.problem_clarity > 0 && (!updatedSignals.problem_clarity || updatedSignals.problem_clarity < 1)) {
+          groqSignals.problem_clarity = gs.problem_clarity;
+        }
+        if (gs.problem_text && !updatedSignals.problem_text) groqSignals.problem_text = gs.problem_text;
+        if (gs.urgency != null && gs.urgency > 0 && (!updatedSignals.urgency || updatedSignals.urgency < 1)) {
+          groqSignals.urgency = gs.urgency;
+        }
+        if (gs.wants_to_book === true && !updatedSignals.wants_to_book) groqSignals.wants_to_book = true;
+        if (gs.has_traffic_or_spend === true && !updatedSignals.has_traffic_or_spend) groqSignals.has_traffic_or_spend = true;
+        if (gs.email) {
+          groqSignals.contact_captured = true;
+        }
+
+        if (Object.keys(groqSignals).length > 0) {
+          updatedSignals = mergeSignals(updatedSignals, groqSignals);
+          // Re-score with enhanced signals
+          const enhancedScore = scoreLead(updatedSignals);
+          // Only upgrade score, never downgrade
+          if (
+            (enhancedScore.final_score === "high" && scoringResult.final_score !== "high") ||
+            (enhancedScore.final_score === "medium" && scoringResult.final_score === "low")
+          ) {
+            // Use the enhanced score for routing
+            assistantResponse = generateCloserResponse(content, updatedSignals, enhancedScore);
+          }
+        }
+      }
+
+      // Use Groq-drafted response if available (overrides deterministic wording only)
+      if (groqResult.drafted_response) {
+        assistantResponse = groqResult.drafted_response;
+      }
+
+      // Update the assistant message in-place
+      setState(prev => {
+        const msgs = [...prev.messages];
+        const lastIdx = msgs.length - 1;
+        if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+          msgs[lastIdx] = { ...msgs[lastIdx], content: assistantResponse };
+        }
+        return { ...prev, messages: msgs, signals: updatedSignals };
+      });
+    }).catch(() => {
+      // Groq call failed — deterministic response stands.  Non-fatal.
+    });
 
     const assistantMessage: ChatMessage = {
       id: uuidv4(),

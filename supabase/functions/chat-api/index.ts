@@ -5,13 +5,26 @@
 // - Lead creation and updates (leads)
 // - Funnel event recording (funnel_events)
 // - Session creation and updates (chat_sessions)
+// - Optional Groq-assisted signal extraction and response drafting
 //
 // SECURITY: Holds SUPABASE_SERVICE_ROLE_KEY server-side.
 // The browser never sees this key. All writes go through this function,
 // which validates inputs, enforces rate limits, and checks idempotency
 // before persisting to Supabase.
+//
+// GROQ: When GROQ_API_KEY is set, the function can use Groq for structured
+// signal extraction and assistant response drafting.  Groq is optional —
+// the function falls back to deterministic extraction when Groq is
+// unavailable, times out, or returns invalid JSON.  Groq NEVER decides
+// final score or route — deterministic scoring remains the source of truth.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  groqExtractSignals,
+  groqDraftResponse,
+  isGroqConfigured,
+  type GroqExtractedSignals,
+} from "./groq.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,7 +32,7 @@ const corsHeaders = {
 };
 
 interface ChatPayload {
-  action: "create_session" | "create_message" | "create_lead" | "record_event";
+  action: "create_session" | "create_message" | "create_lead" | "record_event" | "process_message";
   session_id?: string;
   visitor_id?: string;
   tenant_id: string;
@@ -36,6 +49,19 @@ interface ChatPayload {
   // Event fields
   event_type?: string;
   data?: Record<string, unknown>;
+  // process_message fields
+  conversation_history?: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  current_signals?: Record<string, unknown>;
+  last_question_purpose?: string | null;
+  tenant_config?: Record<string, unknown>;
+  deterministic_decision?: {
+    next_gap: string | null;
+    final_score: string;
+    route: string;
+    business_type_text?: string;
+    problem_text?: string;
+    next_action: string;
+  };
 }
 
 function getClientIp(req: Request): string {
@@ -296,6 +322,49 @@ Deno.serve(async (req: Request) => {
 
         if (error) throw new Error(`Failed to record event: ${error.message}`);
         result = { event: data };
+        break;
+      }
+
+      case "process_message": {
+        // Optional Groq-assisted signal extraction and response drafting.
+        // This action does NOT persist anything — it only calls Groq and
+        // returns the results.  The browser uses these to augment its
+        // deterministic extraction.
+        if (!body.content) {
+          return new Response(
+            JSON.stringify({ error: "content is required for process_message" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const groqAvailable = isGroqConfigured();
+        let extractedSignals: GroqExtractedSignals | null = null;
+        let draftedResponse: string | null = null;
+
+        if (groqAvailable) {
+          // Attempt Groq signal extraction
+          extractedSignals = await groqExtractSignals(
+            body.content,
+            body.conversation_history || [],
+            body.current_signals || {},
+            body.last_question_purpose ?? null,
+            body.tenant_config || {}
+          ).catch(() => null);
+
+          // Attempt Groq response drafting if we have a deterministic decision
+          if (body.deterministic_decision) {
+            draftedResponse = await groqDraftResponse(
+              body.deterministic_decision,
+              body.conversation_history || []
+            ).catch(() => null);
+          }
+        }
+
+        result = {
+          groq_available: groqAvailable,
+          extracted_signals: extractedSignals,
+          drafted_response: draftedResponse,
+        };
         break;
       }
 

@@ -105,11 +105,13 @@ function buildSummary(signals: Signals, score: ScoringResult): LeadSummary {
         : "Business owner"
       : "No business context";
 
-  const painPoint = signals.problem_clarity >= 2
-    ? "Clear problem identified"
-    : signals.problem_clarity === 1
-      ? "Partial problem indication"
-      : "No specific pain articulated";
+  const painPoint = signals.problem_text
+    ? signals.problem_text
+    : signals.problem_clarity >= 2
+      ? "Clear problem identified"
+      : signals.problem_clarity === 1
+        ? "Partial problem indication"
+        : "No specific pain articulated";
 
   const urgencyLabel = signals.urgency >= 2
     ? "High — needs solution soon"
@@ -217,58 +219,65 @@ export function scoreLead(signals: Signals): ScoringResult {
 /**
  * Extract signals from user input using deterministic pattern matching.
  * This is a fallback when LLM extraction is not available.
+ *
+ * IMPORTANT: Only returns positively detected fields.  Absence of evidence
+ * in a new message must NOT erase prior captured signals.  This prevents
+ * the qualification loop where a pain answer like "getting leads" would
+ * overwrite has_business=true with false because the pain answer does not
+ * re-state the business context.
  */
 export function extractSignalsFromText(input: string): Partial<Signals> {
   const normalized = input.toLowerCase();
   const signals: Partial<Signals> = {};
 
-  // Business detection
-  signals.has_business =
+  // Business detection — only set when positively matched
+  const hasBusiness =
     /(?:run|own|have|operate|manage|founded)\s+(?:a|an|the|my)?\s*(?:business|company|startup|brand|agency|ecommerce|store|shop)/i.test(normalized) ||
     /(?:business|company|startup|brand|agency|ecommerce|store|shop)\s+(?:owner|founder|ceo|director)/i.test(normalized) ||
     /(?:i have a|i run a|i own a)\s*(?:small )?(?:business|company|service business|startup|brand|agency|ecommerce|store|shop)/i.test(normalized);
+  if (hasBusiness) signals.has_business = true;
 
-  // Traffic or spend detection
-  signals.has_traffic_or_spend =
+  // Traffic or spend detection — only set when positively matched
+  const hasTraffic =
     /(?:spending|spend|investing|running)\s+(?:on|in)?\s*(?:ads|advertising|marketing|paid|ppc|facebook ads|google ads|traffic)/i.test(normalized) ||
     /(?:getting|receiving|have|having)\s+(?:traffic|visitors|leads|customers)/i.test(normalized) ||
     /(?:budget|spend|spending)\s+(?:\$|dollars|usd|monthly|annual)/i.test(normalized) ||
     /(?:we are spending|we're spending|spending on)/i.test(normalized);
+  if (hasTraffic) signals.has_traffic_or_spend = true;
 
-  // Problem clarity detection
+  // Problem clarity detection — only set when positively matched
   if (/\b(problem|issue|challenge|struggle|pain|difficulty|trouble)\b/i.test(normalized)) {
     signals.problem_clarity = 2;
   } else if (/\b(weak|poor|bad|not working|broken|inefficient)\s+(?:funnel|conversion|sales|process)/i.test(normalized) ||
              /(?:funnel is weak|follow-up is slow)/i.test(normalized)) {
     signals.problem_clarity = 1;
-  } else {
-    signals.problem_clarity = 0;
   }
 
-  // Urgency detection
+  // Urgency detection — only set when positively matched
   if (/\b(urgent|asap|immediately|right now|today|tomorrow|this week|soon|quickly)\b/i.test(normalized) ||
       /(?:i want to talk soon)/i.test(normalized)) {
     signals.urgency = 2;
   } else if (/\b(eventually|planning|considering)\b/i.test(normalized)) {
     signals.urgency = 1;
-  } else {
-    signals.urgency = 0;
   }
 
-  // Booking intent detection
-  signals.wants_to_book =
+  // Booking intent detection — only set when positively matched
+  const wantsToBook =
     /(?:book|schedule|reserve|set up|arrange)\s+(?:a|an|the)?\s*(?:call|meeting|demo|consultation|chat)/i.test(normalized) ||
     /(?:talk|speak|connect|meet)\s+(?:soon|now|today|tomorrow)/i.test(normalized) ||
     /calendly/i.test(normalized);
+  if (wantsToBook) signals.wants_to_book = true;
 
-  // Manual sales signal detection
-  signals.manual_sales_signal =
+  // Manual sales signal detection — only set when positively matched
+  const manualSales =
     /(?:sales|revenue|profit|growth|scale|expand)/i.test(normalized) &&
     /(?:team|process|funnel|pipeline)/i.test(normalized);
+  if (manualSales) signals.manual_sales_signal = true;
 
-  // Budget signal detection
-  signals.budget_signal =
+  // Budget signal detection — only set when positively matched
+  const hasBudget =
     /(?:budget|money|funds|investment|roi|return on investment)/i.test(normalized);
+  if (hasBudget) signals.budget_signal = true;
 
   return signals;
 }
@@ -291,7 +300,8 @@ export function mergeSignals(
     budget_signal: extracted.budget_signal !== undefined ? extracted.budget_signal : existing.budget_signal,
     contact_captured: extracted.contact_captured !== undefined ? extracted.contact_captured : existing.contact_captured,
     model_proposed_score: existing.model_proposed_score,
-    business_type_text: extracted.business_type_text !== undefined ? extracted.business_type_text : existing.business_type_text
+    business_type_text: extracted.business_type_text !== undefined ? extracted.business_type_text : existing.business_type_text,
+    problem_text: extracted.problem_text !== undefined ? extracted.problem_text : existing.problem_text
   };
 }
 
@@ -415,6 +425,45 @@ export function extractBusinessTypeFromContext(input: string): Partial<Signals> 
     has_business: true,
     business_type_text: input.trim()
   };
+}
+
+// ---- Context-aware pain / growth extraction ----
+
+// Greetings, refusals, and generic filler that must NOT be treated as pain.
+const PAIN_STOPWORDS = /^(hi|hello|hey|yo|sup|hiya|yes|no|ok|okay|sure|maybe|idk|nah|nope|nothing|n\/a|na|what|why|how|idk|i don'?t want to say|i don'?t know)\b/i;
+
+// Pain / growth phrases that indicate a real business problem.
+const PAIN_PATTERNS =
+  /(?:getting|get|more|need|need more|want|want more|increase|grow|grow more|improve|boost|drive|attract|acquire|generate)\s+(?:leads|customers|clients|sales|bookings|orders|walk-?ins|traffic|revenue|inquiries|calls|appointments|sign-?ups|conversions)/i;
+
+// Short noun-phrase pain indicators (e.g. "lead quality", "follow-up speed").
+const PAIN_NOUN_PHRASES =
+  /\b(?:lead quality|follow-?up speed|conversion rates?|customer acquisition|low sales|missed inquiries|slow replies|faster replies|not enough customers|no customers|losing customers|churn|retention|funnel leaks?|pipeline gaps?|poor conversion|bad reviews?|online presence|social media|seo|website traffic|online orders|phone orders|delivery issues|staff turnover|no-?shows|cancellations)\b/i;
+
+/**
+ * Context-aware pain / growth extraction.
+ * When the bot just asked a "pain" question and the user replies with a short
+ * answer like "getting leads" or "more customers", interpret it as a
+ * pain/growth signal.
+ *
+ * Returns extracted signals if the input looks like a pain answer,
+ * or null if the input should fall through to standard extraction.
+ */
+export function extractPainFromContext(input: string): Partial<Signals> | null {
+  const trimmed = input.trim();
+  if (trimmed.length < 2 || trimmed.length > 120) return null;
+  if (PAIN_STOPWORDS.test(trimmed)) return null;
+  if (trimmed.includes("?")) return null;
+
+  // Check for explicit pain/growth patterns
+  if (PAIN_PATTERNS.test(trimmed) || PAIN_NOUN_PHRASES.test(trimmed)) {
+    return {
+      problem_clarity: 1,
+      problem_text: trimmed
+    };
+  }
+
+  return null;
 }
 
 // ---- Structured extraction helpers ----
