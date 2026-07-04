@@ -97,11 +97,13 @@ function buildFactors(signals: Signals, breakdown: ScoreBreakdown): ScoreFactor[
  * lead_quality, next_action.
  */
 function buildSummary(signals: Signals, score: ScoringResult): LeadSummary {
-  const businessType = signals.has_business
-    ? signals.has_traffic_or_spend
-      ? "Active business with traffic/spend"
-      : "Business owner"
-    : "No business context";
+  const businessType = signals.business_type_text
+    ? signals.business_type_text
+    : signals.has_business
+      ? signals.has_traffic_or_spend
+        ? "Active business with traffic/spend"
+        : "Business owner"
+      : "No business context";
 
   const painPoint = signals.problem_clarity >= 2
     ? "Clear problem identified"
@@ -288,7 +290,8 @@ export function mergeSignals(
     manual_sales_signal: extracted.manual_sales_signal !== undefined ? extracted.manual_sales_signal : existing.manual_sales_signal,
     budget_signal: extracted.budget_signal !== undefined ? extracted.budget_signal : existing.budget_signal,
     contact_captured: extracted.contact_captured !== undefined ? extracted.contact_captured : existing.contact_captured,
-    model_proposed_score: existing.model_proposed_score
+    model_proposed_score: existing.model_proposed_score,
+    business_type_text: extracted.business_type_text !== undefined ? extracted.business_type_text : existing.business_type_text
   };
 }
 
@@ -303,7 +306,8 @@ export const defaultSignals: Signals = {
   wants_to_book: false,
   manual_sales_signal: false,
   budget_signal: false,
-  contact_captured: false
+  contact_captured: false,
+  business_type_text: undefined
 };
 
 /**
@@ -359,6 +363,58 @@ export function getQualificationGap(signals: Signals): "business" | "pain" | "ur
   if (signals.urgency < 1 && !signals.wants_to_book && !signals.has_traffic_or_spend) return "urgency";
   if (!signals.contact_captured && signals.wants_to_book) return "readiness";
   return null;
+}
+
+// ---- Context-aware business type detection ----
+
+// Greetings, refusals, and generic filler that must NOT be treated as business types.
+const BUSINESS_TYPE_STOPWORDS = /^(hi|hello|hey|yo|sup|hiya|yes|no|ok|okay|sure|maybe|idk|nah|nope|nothing|n\/a|na)\b/i;
+
+/**
+ * Determine whether a trimmed user input looks like a short noun phrase
+ * that could be a business type (e.g. "Chicken stall", "Barbershop",
+ * "Carinderia", "Dental clinic", "Sari-sari store").
+ *
+ * Heuristics:
+ * - 1–6 words (covers "sari-sari store", "auto repair shop")
+ * - At least 2 characters
+ * - Not a greeting, refusal, or filler word
+ * - Not a question (no "?")
+ * - Not a full sentence (no "I run", "My business is", etc.)
+ *
+ * This is deliberately permissive — the caller guards with context
+ * (last asked question was "business") so false positives are rare.
+ */
+export function isLikelyBusinessType(input: string): boolean {
+  const trimmed = input.trim();
+  if (trimmed.length < 2 || trimmed.length > 80) return false;
+  if (BUSINESS_TYPE_STOPWORDS.test(trimmed)) return false;
+  if (trimmed.includes("?")) return false;
+
+  // Reject full sentences that already match the explicit business patterns.
+  if (/(?:run|own|have|operate|manage|founded)\s+(?:a|an|the|my)?\s*(?:business|company|startup|brand|agency|ecommerce|store|shop)/i.test(trimmed)) {
+    return false;
+  }
+
+  const wordCount = trimmed.split(/\s+/).length;
+  return wordCount >= 1 && wordCount <= 6;
+}
+
+/**
+ * Context-aware business type extraction.
+ * When the bot just asked a "business" question and the user replies with
+ * a short noun phrase, interpret it as the business type and set the
+ * corresponding signals.
+ *
+ * Returns extracted signals if the input is a valid short business type,
+ * or null if the input should fall through to standard extraction.
+ */
+export function extractBusinessTypeFromContext(input: string): Partial<Signals> | null {
+  if (!isLikelyBusinessType(input)) return null;
+  return {
+    has_business: true,
+    business_type_text: input.trim()
+  };
 }
 
 // ---- Structured extraction helpers ----

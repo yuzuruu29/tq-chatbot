@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { ChatMessage, ChatSession, VisitorContext, Lead } from "../types";
 import { messageService } from "../services/messageService";
 import { leadService } from "../services/leadService";
-import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals, getQualificationGap } from "../lib/scoring";
+import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals, getQualificationGap, extractBusinessTypeFromContext } from "../lib/scoring";
 import { calendlyService } from "../services/calendlyService";
 import { makeIdempotencyKey, idempotencyTracker, isSpamSubmission } from "../lib/idempotency";
 import { chatRateLimiter } from "../lib/rateLimit";
@@ -20,6 +20,7 @@ interface PersistedChatState {
   currentStep: ChatState["currentStep"];
   contactInfo: ChatState["contactInfo"];
   sessionId: string;
+  lastQuestionPurpose?: "business" | "pain" | "urgency" | "readiness" | null;
 }
 
 interface ChatWidgetProps {
@@ -43,6 +44,9 @@ interface ChatState {
   };
   showCalendly: boolean;
   showContactForm: boolean;
+  /** Tracks which qualification question was last asked, so the next user
+   *  message can be interpreted in context (e.g. short noun phrase = business). */
+  lastQuestionPurpose: "business" | "pain" | "urgency" | "readiness" | null;
 }
 
 export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated, onClose }) => {
@@ -57,7 +61,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     currentStep: "greeting",
     contactInfo: {},
     showCalendly: false,
-    showContactForm: false
+    showContactForm: false,
+    lastQuestionPurpose: null
   });
 
   // Controlled value for the chat input so the form submit path has the
@@ -146,7 +151,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
         currentStep: persisted.currentStep,
         contactInfo: persisted.contactInfo,
         showContactForm: persisted.currentStep === "contact_capture",
-        showCalendly: persisted.currentStep === "routing"
+        showCalendly: persisted.currentStep === "routing",
+        lastQuestionPurpose: persisted.lastQuestionPurpose ?? null
       }));
       return;
     }
@@ -249,7 +255,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       messages: [...prev.messages, userMessage]
     }));
 
-    const extractedSignals = extractSignalsFromText(content);
+    // Context-aware signal extraction: if the bot just asked a specific
+    // qualification question, interpret short answers in that context.
+    const prevPurpose = state.lastQuestionPurpose;
+    let extractedSignals = extractSignalsFromText(content);
+    if (prevPurpose === "business" && !extractedSignals.has_business) {
+      const contextSignals = extractBusinessTypeFromContext(content);
+      if (contextSignals) {
+        extractedSignals = { ...extractedSignals, ...contextSignals };
+      }
+    }
     const updatedSignals = mergeSignals(state.signals, extractedSignals);
 
     if (updatedSignals.wants_to_book && !state.contactInfo.email) {
@@ -265,6 +280,20 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
 
     const scoringResult = scoreLead(updatedSignals);
     const assistantResponse = generateCloserResponse(content, updatedSignals, scoringResult);
+
+    // Determine what question the response is asking so the NEXT user message
+    // can be interpreted in context.  This must happen AFTER generateCloserResponse
+    // because the response text depends on the updated signals.
+    let nextQuestionPurpose: ChatState["lastQuestionPurpose"] = null;
+    if (/what kind of business|tell me.*about your business/i.test(assistantResponse)) {
+      nextQuestionPurpose = "business";
+    } else if (/what.*(?:trying to improve|specific challenge|problem|pain)/i.test(assistantResponse)) {
+      nextQuestionPurpose = "pain";
+    } else if (/how urgent/i.test(assistantResponse)) {
+      nextQuestionPurpose = "urgency";
+    } else if (/current process|handling interested visitors/i.test(assistantResponse)) {
+      nextQuestionPurpose = "readiness";
+    }
 
     const assistantMessage: ChatMessage = {
       id: uuidv4(),
@@ -288,7 +317,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       ...prev,
       messages: [...prev.messages, assistantMessage],
       signals: updatedSignals,
-      isLoading: false
+      isLoading: false,
+      lastQuestionPurpose: nextQuestionPurpose
     }));
 
     // Only create a lead once per session, and only when scoring triggers an
@@ -299,7 +329,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     }
 
     sendingRef.current = false;
-  }, [state.context, state.session, state.signals, state.contactInfo]);
+  }, [state.context, state.session, state.signals, state.contactInfo, state.lastQuestionPurpose]);
 
   const handleSendSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     // Single submit path: form submit handles both Enter (browser-native) and
@@ -342,10 +372,14 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     }
 
     if (gap === "pain") {
-      return (
+      const painQuestion =
         config.qualificationQuestions.find(q => q.purpose === "pain")?.text
-        || "What is the specific challenge? For example, is it lead quality, follow-up speed, or conversion rates?"
-      );
+        || "What is the specific challenge? For example, is it lead quality, follow-up speed, or conversion rates?";
+      // Acknowledge the business type if we just captured it.
+      if (signals.business_type_text) {
+        return `Got it — ${signals.business_type_text}. ${painQuestion}`;
+      }
+      return painQuestion;
     }
 
     if (gap === "urgency") {
@@ -542,7 +576,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
         signals: state.signals,
         currentStep: state.currentStep,
         contactInfo: state.contactInfo,
-        sessionId: state.session.id
+        sessionId: state.session.id,
+        lastQuestionPurpose: state.lastQuestionPurpose
       };
       sessionStorage.setItem(
         SESSION_STORAGE_KEY(visitorIdRef.current, tenantId),
@@ -551,7 +586,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     } catch {
       // sessionStorage may be full or blocked (private browsing). Non-fatal.
     }
-  }, [state.messages, state.signals, state.currentStep, state.contactInfo, state.session, tenantId]);
+  }, [state.messages, state.signals, state.currentStep, state.contactInfo, state.session, tenantId, state.lastQuestionPurpose]);
 
   // Persist state whenever conversation-relevant fields change.
   useEffect(() => {

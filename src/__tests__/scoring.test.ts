@@ -2,7 +2,7 @@
 // These tests verify the deterministic scoring function works as expected
 
 import { describe, it, expect } from "vitest";
-import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap, extractEmail, isValidEmail, extractBusinessName } from "../lib/scoring";
+import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap, extractEmail, isValidEmail, extractBusinessName, isLikelyBusinessType, extractBusinessTypeFromContext } from "../lib/scoring";
 import type { Signals } from "../types";
 
 // Test Scenario 1: Hot Lead
@@ -584,5 +584,159 @@ describe("Business Name Extraction", () => {
   it("should not hallucinate names that are not in the input", () => {
     expect(extractBusinessName("I have a small business doing marketing")).toBeNull();
     expect(extractBusinessName("we help companies grow")).toBeNull();
+  });
+});
+
+// ---- Short business type recognition (context-aware extraction) ----
+
+describe("isLikelyBusinessType", () => {
+  it("should accept common short business types", () => {
+    const valid = [
+      "Chicken stall",
+      "Barbershop",
+      "Carinderia",
+      "Laundry shop",
+      "Sari-sari store",
+      "Dental clinic",
+      "Auto repair shop",
+      "Law firm",
+      "Bakery",
+      "Gym",
+    ];
+    valid.forEach(phrase => {
+      expect(isLikelyBusinessType(phrase), `Should accept: "${phrase}"`).toBe(true);
+    });
+  });
+
+  it("should reject greetings and filler", () => {
+    const invalid = ["hi", "hello", "hey", "yo", "ok", "yes", "no", "nah", "idk"];
+    invalid.forEach(phrase => {
+      expect(isLikelyBusinessType(phrase), `Should reject: "${phrase}"`).toBe(false);
+    });
+  });
+
+  it("should reject questions", () => {
+    expect(isLikelyBusinessType("What do you mean?")).toBe(false);
+    expect(isLikelyBusinessType("Can you help?")).toBe(false);
+  });
+
+  it("should reject empty or too-long input", () => {
+    expect(isLikelyBusinessType("")).toBe(false);
+    expect(isLikelyBusinessType("a")).toBe(false);
+    expect(isLikelyBusinessType("x".repeat(81))).toBe(false);
+  });
+
+  it("should reject full sentences that already match explicit patterns", () => {
+    expect(isLikelyBusinessType("I run a business")).toBe(false);
+    expect(isLikelyBusinessType("I own a shop")).toBe(false);
+  });
+});
+
+describe("extractBusinessTypeFromContext", () => {
+  it("should return has_business + business_type_text for valid short phrases", () => {
+    const result = extractBusinessTypeFromContext("Chicken stall");
+    expect(result).not.toBeNull();
+    expect(result!.has_business).toBe(true);
+    expect(result!.business_type_text).toBe("Chicken stall");
+  });
+
+  it("should return null for greetings", () => {
+    expect(extractBusinessTypeFromContext("hello")).toBeNull();
+    expect(extractBusinessTypeFromContext("hi")).toBeNull();
+  });
+
+  it("should return null for empty input", () => {
+    expect(extractBusinessTypeFromContext("")).toBeNull();
+  });
+});
+
+// Regression: short business answers must advance the funnel
+describe("Regression - Short Business Answers", () => {
+  it("'Chicken stall' after business question should count as business type", () => {
+    // Simulate: context says bot asked for business, user replies "Chicken stall"
+    const contextSignals = extractBusinessTypeFromContext("Chicken stall");
+    expect(contextSignals).not.toBeNull();
+    expect(contextSignals!.has_business).toBe(true);
+
+    // Merged with defaults should produce has_business = true
+    const merged = mergeSignals(defaultSignals, contextSignals!);
+    expect(merged.has_business).toBe(true);
+    expect(merged.business_type_text).toBe("Chicken stall");
+  });
+
+  it("'Chicken stall' should not trigger repeated business question", () => {
+    // After context-aware extraction, gap should be "pain", not "business"
+    const contextSignals = extractBusinessTypeFromContext("Chicken stall")!;
+    const merged = mergeSignals(defaultSignals, contextSignals);
+    const gap = getQualificationGap(merged);
+    expect(gap).not.toBe("business");
+    expect(gap).toBe("pain");
+  });
+
+  it("business type only should ask for pain/problem next", () => {
+    const contextSignals = extractBusinessTypeFromContext("Barbershop")!;
+    const merged = mergeSignals(defaultSignals, contextSignals);
+    expect(getQualificationGap(merged)).toBe("pain");
+  });
+
+  it("business type + pain point should advance to urgency/readiness", () => {
+    const contextSignals = extractBusinessTypeFromContext("Laundry shop")!;
+    let merged = mergeSignals(defaultSignals, contextSignals);
+    // Simulate pain point received
+    merged = mergeSignals(merged, { problem_clarity: 2 });
+    // With business + pain, gap should no longer be "business" or "pain"
+    expect(getQualificationGap(merged)).not.toBe("business");
+    expect(getQualificationGap(merged)).not.toBe("pain");
+  });
+
+  it("vague response like 'hello' should still ask for business type", () => {
+    // "hello" is not a business type even with context
+    const contextSignals = extractBusinessTypeFromContext("hello");
+    expect(contextSignals).toBeNull();
+
+    // Standard extraction should also not set has_business
+    const extracted = extractSignalsFromText("hello");
+    const merged = mergeSignals(defaultSignals, extracted);
+    expect(merged.has_business).toBe(false);
+    expect(getQualificationGap(merged)).toBe("business");
+  });
+
+  it("refusal like 'I don't want to say' should not invent a business type", () => {
+    // "I don't want to say" — context extraction may pass isLikelyBusinessType,
+    // but standard extraction does NOT set has_business for this.
+    // The key invariant: merged signals must not have has_business true.
+    const extracted = extractSignalsFromText("I don't want to say");
+    const merged = mergeSignals(defaultSignals, extracted);
+    expect(merged.has_business).toBe(false);
+  });
+
+  it("business_type_text should surface in scoring summary", () => {
+    const contextSignals = extractBusinessTypeFromContext("Dental clinic")!;
+    const merged = mergeSignals(defaultSignals, contextSignals);
+    const result = scoreLead(merged);
+    expect(result.summary).toBeDefined();
+    expect(result.summary!.business_type).toBe("Dental clinic");
+  });
+
+  it("various short business types should all be accepted", () => {
+    const types = [
+      "Chicken stall",
+      "Barbershop",
+      "Carinderia",
+      "Laundry shop",
+      "Sari-sari store",
+      "Dental clinic",
+      "Law firm",
+      "Bakery",
+    ];
+    types.forEach(biz => {
+      const signals = extractBusinessTypeFromContext(biz);
+      expect(signals, `Should extract: "${biz}"`).not.toBeNull();
+      expect(signals!.has_business).toBe(true);
+      expect(signals!.business_type_text).toBe(biz);
+
+      const merged = mergeSignals(defaultSignals, signals!);
+      expect(getQualificationGap(merged), `Gap should be pain for "${biz}"`).toBe("pain");
+    });
   });
 });

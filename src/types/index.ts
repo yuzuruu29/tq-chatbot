@@ -30,6 +30,8 @@ export type Signals = {
   budget_signal: boolean;
   contact_captured: boolean;
   model_proposed_score?: LeadScore;
+  /** Human-readable business type captured from context-aware extraction. */
+  business_type_text?: string;
 };
 
 export type ScoringResult = {
