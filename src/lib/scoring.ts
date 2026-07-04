@@ -343,11 +343,89 @@ export function getRouteConfig(route: Route) {
  * Determine what qualification gap remains in the signals.
  * Returns the next purpose the closer should pursue, or null if
  * enough signals exist for a confident score.
+ *
+ * Early-stop: if the signals already produce a high score, we return null
+ * immediately rather than asking for more information.  This is the
+ * product judgement that distinguishes a closer from a questionnaire —
+ * a closer stops qualifying once it can route.
  */
 export function getQualificationGap(signals: Signals): "business" | "pain" | "urgency" | "readiness" | null {
+  // Early-stop: if the signals already qualify as high, do not ask more.
+  const provisional = scoreLead(signals);
+  if (provisional.final_score === "high") return null;
+
   if (!signals.has_business) return "business";
   if (signals.problem_clarity < 1) return "pain";
   if (signals.urgency < 1 && !signals.wants_to_book && !signals.has_traffic_or_spend) return "urgency";
   if (!signals.contact_captured && signals.wants_to_book) return "readiness";
+  return null;
+}
+
+// ---- Structured extraction helpers ----
+
+// RFC 5322 simplified email pattern.  Rejects obvious garbage while
+// accepting real-world addresses.  Does not validate DNS or MX records.
+const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+
+/**
+ * Extract the first email address found in free-text input.
+ * Returns the normalised email string, or null if none found.
+ *
+ * This is deterministic — no LLM call.  It is used for signal extraction
+ * from chat messages (e.g. "my email is john@example.com").
+ */
+export function extractEmail(input: string): string | null {
+  const match = input.match(EMAIL_REGEX);
+  return match ? match[0].toLowerCase().trim() : null;
+}
+
+/**
+ * Validate that a string looks like a real email address.
+ * Returns true for valid shape, false otherwise.
+ *
+ * This is a shape check only — it does not verify deliverability.
+ */
+export function isValidEmail(email: string): boolean {
+  if (!email || email.length > 254) return false;
+  // Must have exactly one @, local part before, domain with at least one dot.
+  const parts = email.split("@");
+  if (parts.length !== 2) return false;
+  const [local, domain] = parts;
+  if (local.length === 0 || local.length > 64) return false;
+  if (!domain.includes(".")) return false;
+  const domainParts = domain.split(".");
+  if (domainParts.some(p => p.length === 0)) return false;
+  const tld = domainParts[domainParts.length - 1];
+  if (tld.length < 2) return false;
+  return EMAIL_REGEX.test(email);
+}
+
+/**
+ * Extract the first business name mentioned in free-text input.
+ * Returns the name string, or null if no clear business name is found.
+ *
+ * This is a heuristic — it looks for patterns like "my company X",
+ * "we are called Y", "the business is Z".  It does NOT hallucinate
+ * names that are not present in the input.
+ */
+export function extractBusinessName(input: string): string | null {
+  const normalized = input.trim();
+  // "my company is X" / "our company called X" / "the business is X"
+  const patterns = [
+    /(?:my|our|the)\s+(?:company|business|startup|agency|brand|firm)\s+(?:is|called|named)\s+(?:called\s+|named\s+)?["']?([^"',.!?]+)["']?/i,
+    /(?:we(?:'re| are)?|it(?:'s| is))\s+(?:called|named)\s+["']?([^"',.!?]+)["']?/i,
+    /(?:company|business|startup|agency|brand|firm)\s+(?:called|named)\s+["']?([^"',.!?]+)["']?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].trim();
+      // Sanity: at least 2 chars, not just common words.
+      if (name.length >= 2 && !/^(the|a|an|my|our)$/i.test(name)) {
+        return name;
+      }
+    }
+  }
   return null;
 }

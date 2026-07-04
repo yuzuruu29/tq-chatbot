@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS funnel_events (
     'calendly_shown',
     'calendly_clicked',
     'calendly_booked',
+    'booking_cancelled',
     'nurture_shown',
     'booking_option_shown',
     'helpful_guidance_shown',

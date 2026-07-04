@@ -577,8 +577,210 @@ None of the original launch blockers remain. The following are production harden
 | 2026-07-05 | Tenant ID reconciliation | ✅ Complete |
 | 2026-07-05 | Schema fixes (JSONB, rate_limits) | ✅ Complete |
 | 2026-07-05 | Edge Function client architecture | ✅ Complete |
+| 2026-07-05 | Evaluation readiness audit — all 10 hard parts | ✅ Complete |
+| 2026-07-05 | Session persistence (sessionStorage) | ✅ Complete |
+| 2026-07-05 | Structured extraction (email, business name) | ✅ Complete |
+| 2026-07-05 | Early-stop / hot-lead routing | ✅ Complete |
+| 2026-07-05 | Booking suppression with cancellation re-open | ✅ Complete |
+| 2026-07-05 | Edge Function tenant validation + payload guards | ✅ Complete |
+| 2026-07-05 | Edge Function timeout (10s abort) | ✅ Complete |
+| 2026-07-05 | Graceful failure: .catch() on persistence calls | ✅ Complete |
+
+---
+
+## Evaluation Readiness Audit (2026-07-05)
+
+This section covers the 10 hard-parts evaluation lens. Each area documents
+what was chosen, what was deliberately skipped for V1, and why.
+
+### Area 1: Conversation State
+
+**What was chosen**: Client-side React state with sessionStorage persistence.
+The visitor_id is stable across refreshes (localStorage). On page load, the
+widget checks sessionStorage for existing conversation state (messages,
+signals, currentStep, contactInfo, sessionId) and restores it if found.
+
+**State location**:
+- `visitor_id` — localStorage (stable across refreshes)
+- `session_id` — sessionStorage (tab-scoped, survives refresh)
+- `messages`, `signals`, `currentStep`, `contactInfo` — React state + sessionStorage
+- DB persistence — via Edge Function (chat_sessions, chat_messages tables)
+
+**Refresh behaviour**: The conversation survives page refresh within the same
+tab. Opening a new tab starts a fresh conversation (sessionStorage is
+tab-scoped). The idempotency tracker is re-populated from persisted messages
+so retries after refresh do not create duplicates.
+
+**V1 tradeoff**: Server-side session recovery (loading messages from Supabase
+by session_id) is not implemented. For the V1 use case (short 2–5 message
+qualification conversations), sessionStorage is sufficient.
+
+**Status**: ✅ Implemented
+
+### Area 2: Structured Extraction
+
+**What was chosen**: Deterministic regex-based extraction in
+`extractSignalsFromText()` with dedicated helpers for email
+(`extractEmail`, `isValidEmail`) and business names (`extractBusinessName`).
+
+**How missing values are handled**:
+- Email: returns `null` when not found — never fabricated
+- Business name: returns `null` when not found — never hallucinated
+- Problem/pain: `problem_clarity` defaults to `0` (no problem)
+- All boolean signals default to `false`
+
+**Refusal handling**: If the user refuses to provide information, the regex
+does not match and the signal stays at its default. The bot asks again
+through the closer-style flow.
+
+**Tests added**: Valid email, invalid email, email from free text, email
+normalisation, business name extraction, refusal-to-provide, no hallucination.
+
+**Status**: ✅ Implemented
+
+### Area 3: Auditable Scoring
+
+**What was chosen**: `scoreLead()` is the single source of truth. It returns
+`final_score`, `score_value` (0–100), `breakdown` (5 dimensions), `factors[]`
+with human-readable reasons, `score_reason`, and `summary`.
+
+**Signal capture is separate from scoring**: `extractSignalsFromText()` captures
+raw signals. `scoreLead()` interprets them. A reviewer can inspect
+`breakdown`, `factors`, and `score_reason` to understand why a lead was
+high/medium/low.
+
+**Determinism**: Given the same signals, `scoreLead()` always returns the same
+result. No randomness or LLM dependency in the final score.
+
+**Tests**: 37 scoring tests covering all 4 rules, edge cases, signal
+extraction, signal merging, breakdown verification, and qualification gap
+analysis.
+
+**Status**: ✅ Implemented
+
+### Area 4: Idempotent Events
+
+**What was chosen**: Multi-layer idempotency:
+
+1. **Client-side guard**: `sendingRef` blocks re-entry from rapid clicks/Enter.
+2. **Idempotency tracker**: `makeIdempotencyKey(sessionId, content, role)` with
+   5000-entry Set prevents duplicate message persistence.
+3. **Edge Function dedup**: Time-windowed (5s) dedup for messages.
+4. **Lead upsert**: Edge Function upserts by (session_id, visitor_id).
+
+**V1 tradeoff**: No DB-level UNIQUE constraint on chat_messages. The Edge
+Function's time-windowed dedup is sufficient for V1. Production would add a
+content_hash UNIQUE constraint.
+
+**Tests**: 19 tests covering key generation, tracker, suppression, spam filter,
+and rate limiting.
+
+**Status**: ✅ Implemented
+
+### Area 5: Booking Suppression and Sync
+
+**What was chosen**: Alert suppression rules:
+
+1. `score === "low"` → never fires alerts
+2. Same lead_id within 5-minute cooldown → suppressed
+3. `status === "booked"` → no follow-up alerts
+4. `recordBookingCancellation()` → status "contacted", re-enables follow-up
+
+All suppression logged as `alert_suppressed` funnel events with reason.
+
+**V1 tradeoff**: Real booking sync (Calendly webhook) is out of scope. The
+integration points exist (`recordCalendlyBooking`, `recordBookingCancellation`).
+
+**Status**: ✅ Implemented (with documented V1 scope boundary)
+
+### Area 6: Public Endpoint Abuse
+
+**What was chosen**: Defence in depth:
+
+1. **Server-side rate limiting**: `check_rate_limit()` RPC, 30 req/min, returns 429.
+2. **Tenant validation**: Edge Function verifies tenant_id exists in `tenants` table.
+3. **Payload validation**: Rejects > 10KB payloads, caps content at 5000 chars.
+4. **Spam filter**: Rejects empty, garbage, repeated-character submissions.
+5. **PII in logs**: Logs only error messages, never PII.
+6. **No service-role key client-side**: Key exists only in Edge Function env.
+
+**Status**: ✅ Implemented
+
+### Area 7: RLS on Public Write Path
+
+**What was chosen**: All 8 tables have RLS enabled. Policies require `auth.uid()`
+for all reads and writes. The browser does NOT write directly to Supabase —
+all writes go through the Edge Function (service-role key, bypasses RLS).
+Anon key alone cannot read or write any data.
+
+**Status**: ✅ Implemented and documented
+
+### Area 8: Multi-Tenant Reusability
+
+**What was chosen**: `src/config/tenant.ts` is the central seam. What changes
+per tenant: brand, messages, questions, scoring weights, thresholds, route
+rules, dashboard labels, Calendly URL. What does NOT change: scoring logic,
+signal extraction, idempotency, suppression, RLS, widget structure.
+
+**Onboarding**: New tenant = new TenantConfig object + DB record. No code fork.
+
+**V1 tradeoff**: Scoring weights are in config but not yet wired into
+`scoreLead()`. The config seam is ready.
+
+**Status**: ✅ Implemented
+
+### Area 9: Graceful Failure
+
+**What was chosen**:
+
+1. **10-second timeout** on Edge Function calls (AbortController).
+2. **Null return on failure** → services fall back to in-memory transparently.
+3. **`.catch()` on persistence calls** → failed write does not block conversation.
+4. **Dashboard resilience** → handles empty/missing data gracefully.
+5. **No state corruption** → failed Edge Function call does not corrupt local state.
+
+**V1 tradeoff**: No explicit user-facing error message when persistence fails.
+The conversation continues in-memory.
+
+**Status**: ✅ Implemented
+
+### Area 10: Knowing When to Stop
+
+**What was chosen**: `getQualificationGap()` calls `scoreLead()` first. If the
+signals already produce a "high" score, it returns `null` immediately — the
+bot routes instead of asking more questions.
+
+**Product judgement**: A questionnaire collects all fields. A closer stops
+qualifying once it can route. Examples:
+- "I run an ecommerce brand, spending on ads, follow-up is slow" → routes
+  to Calendly immediately (no urgency question asked).
+- "Can I book a call?" → booking path immediately (no business question).
+
+**Tests**: 3 early-stop tests covering hot lead short-circuit, booking intent
+routing, and continued qualification for medium-score leads.
+
+**Status**: ✅ Implemented
+
+---
+
+## Remaining Risks and V1 Tradeoffs
+
+1. **No server-side session recovery**: sessionStorage is tab-scoped. New tab = fresh conversation.
+2. **No DB-level idempotency constraint**: Edge Function time-windowed dedup is sufficient for V1.
+3. **No real booking sync**: Calendly webhook integration is stubbed.
+4. **Scoring weights not wired to config**: Config has weights but `scoreLead()` uses hardcoded rules.
+5. **No LLM extraction**: claudeService is a stub. Production would call Claude for better accuracy.
+6. **No WAF/CDN layer**: Application-level rate limiting is in place.
+
+## Why This Is a Closer, Not a Questionnaire
+
+1. **Qualification gap analysis**: The bot determines what signal is missing and asks only that question.
+2. **Early-stop routing**: When the score is high, the bot routes immediately.
+3. **Signal-driven conversation**: Every question is driven by the current signal state.
+4. **Tailored responses**: Calendly prompt is tailored to the lead's signals.
+5. **Route differentiation**: High → Calendly+alert. Medium → nurture/booking. Low → guidance.
 
 ---
 
 *Last Updated: 2026-07-05*
-*Version: 3.0.0*
+*Version: 4.0.0*

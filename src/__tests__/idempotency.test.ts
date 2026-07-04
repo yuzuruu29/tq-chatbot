@@ -75,6 +75,26 @@ describe("Alert Suppression", () => {
     shouldSuppressAlert("lead-1", "high");
     expect(shouldSuppressAlert("lead-2", "high")).toBe(false);
   });
+
+  it("should suppress alerts for booked leads", () => {
+    expect(shouldSuppressAlert("lead-1", "high", "booked")).toBe(true);
+  });
+
+  it("should not suppress alerts for non-booked leads", () => {
+    resetSuppression();
+    expect(shouldSuppressAlert("lead-1", "high", "new")).toBe(false);
+    resetSuppression();
+    expect(shouldSuppressAlert("lead-1", "high", "contacted")).toBe(false);
+  });
+
+  it("should allow alerts for cancelled-then-reopened leads", () => {
+    // Booked → suppressed
+    expect(shouldSuppressAlert("lead-1", "high", "booked")).toBe(true);
+    // After cancellation, status changes to "contacted" → not suppressed
+    // (cooldown is still active from the booked call, but status check passes)
+    resetSuppression();
+    expect(shouldSuppressAlert("lead-1", "high", "contacted")).toBe(false);
+  });
 });
 
 describe("Spam Submission Detection", () => {

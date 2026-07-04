@@ -50,6 +50,9 @@ interface EdgeResponse {
 /**
  * Call the chat-api Edge Function.
  * Returns null if the function is not deployed (dev mode fallback).
+ *
+ * A 10-second timeout prevents the UI from hanging indefinitely when the
+ * Edge Function is slow or unreachable.
  */
 async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
   const url = getSupabaseUrl();
@@ -57,6 +60,9 @@ async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
     // Supabase not configured — signal fallback to in-memory
     return null;
   }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
   try {
     const response = await fetch(`${url}/functions/v1/chat-api`, {
@@ -66,7 +72,10 @@ async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
         Authorization: `Bearer ${getAnonKey()}`,
       },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
@@ -76,8 +85,13 @@ async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
 
     return await response.json();
   } catch (err) {
-    // Network error or function not deployed — signal fallback
-    console.warn("chat-api unavailable, falling back to in-memory:", err);
+    clearTimeout(timeoutId);
+    // Network error, timeout, or function not deployed — signal fallback
+    if (err instanceof DOMException && err.name === "AbortError") {
+      console.warn("chat-api request timed out after 10s");
+    } else {
+      console.warn("chat-api unavailable, falling back to in-memory:", err);
+    }
     return null;
   }
 }

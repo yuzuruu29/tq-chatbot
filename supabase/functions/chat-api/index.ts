@@ -90,6 +90,23 @@ Deno.serve(async (req: Request) => {
     const body: ChatPayload = await req.json();
     const clientIp = getClientIp(req);
 
+    // Payload size guard: reject oversized requests to bound memory usage.
+    const bodyStr = JSON.stringify(body);
+    if (bodyStr.length > 10_000) {
+      return new Response(
+        JSON.stringify({ error: "Payload too large" }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Content length guard for message bodies: cap at 5000 chars.
+    if (body.content && body.content.length > 5000) {
+      return new Response(
+        JSON.stringify({ error: "Message content too long (max 5000 characters)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Rate limit check
     const rateLimit = await checkRateLimit(supabase, body.visitor_id || "", clientIp);
     if (!rateLimit.allowed) {
@@ -106,6 +123,23 @@ Deno.serve(async (req: Request) => {
     if (!body.tenant_id) {
       return new Response(
         JSON.stringify({ error: "tenant_id is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate tenant_id exists in the database to prevent tenant spoofing.
+    // A malicious client could craft arbitrary tenant_id values; this check
+    // ensures writes are scoped to an actual tenant.
+    const { data: tenant, error: tenantError } = await supabase
+      .from("tenants")
+      .select("id")
+      .eq("id", body.tenant_id)
+      .limit(1)
+      .single();
+
+    if (tenantError || !tenant) {
+      return new Response(
+        JSON.stringify({ error: "Invalid tenant_id" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

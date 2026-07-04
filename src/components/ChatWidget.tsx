@@ -9,6 +9,19 @@ import { chatRateLimiter } from "../lib/rateLimit";
 import { getTenantConfig, type TenantConfig } from "../config/tenant";
 import { v4 as uuidv4 } from "uuid";
 
+// Persistence key for sessionStorage — scoped to visitor + tenant so
+// multiple tabs or tenants do not collide.
+const SESSION_STORAGE_KEY = (visitorId: string, tenantId: string) =>
+  `tq_chat_state_${tenantId}_${visitorId}`;
+
+interface PersistedChatState {
+  messages: ChatMessage[];
+  signals: typeof defaultSignals;
+  currentStep: ChatState["currentStep"];
+  contactInfo: ChatState["contactInfo"];
+  sessionId: string;
+}
+
 interface ChatWidgetProps {
   tenantId: string;
   onLeadCreated?: (lead: Lead) => void;
@@ -64,6 +77,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Visitor ID is stable across refreshes (persisted in localStorage).
+  const visitorIdRef = useRef<string>("");
+
   useEffect(() => {
     initializeSession();
   }, [tenantId]);
@@ -79,12 +95,63 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
   }, [state.currentStep, state.showCalendly, state.showContactForm]);
 
   const initializeSession = async () => {
+    // Visitor ID is stable across refreshes (persisted in localStorage).
     let visitorId = localStorage.getItem(`tq_visitor_${tenantId}`);
     if (!visitorId) {
       visitorId = uuidv4();
       localStorage.setItem(`tq_visitor_${tenantId}`, visitorId);
     }
+    visitorIdRef.current = visitorId;
 
+    // Check sessionStorage for existing conversation state.
+    // This allows the conversation to survive page refresh without
+    // requiring server-side session persistence.
+    const persisted = loadPersistedState(visitorId, tenantId);
+
+    if (persisted && persisted.messages.length > 0) {
+      // Restore conversation from sessionStorage.
+      const session: ChatSession = {
+        id: persisted.sessionId,
+        visitor_id: visitorId,
+        tenant_id: tenantId,
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const context: VisitorContext = {
+        visitor_id: visitorId,
+        session_id: persisted.sessionId,
+        tenant_id: tenantId
+      };
+
+      // Restore idempotency tracker state for persisted messages so
+      // retries after refresh do not create duplicates.
+      for (const msg of persisted.messages) {
+        const key = makeIdempotencyKey(persisted.sessionId, msg.content, msg.role);
+        idempotencyTracker.add(key);
+      }
+
+      // If lead was already created before refresh, prevent duplicate.
+      if (persisted.currentStep === "routing" || persisted.currentStep === "completed") {
+        leadCreatedRef.current = true;
+      }
+
+      setState(prev => ({
+        ...prev,
+        messages: persisted.messages,
+        session,
+        context,
+        signals: persisted.signals,
+        currentStep: persisted.currentStep,
+        contactInfo: persisted.contactInfo,
+        showContactForm: persisted.currentStep === "contact_capture",
+        showCalendly: persisted.currentStep === "routing"
+      }));
+      return;
+    }
+
+    // No persisted state — create a fresh session.
     const context: VisitorContext = {
       visitor_id: visitorId,
       session_id: uuidv4(),
@@ -170,6 +237,11 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       session_id: state.session.id,
       content: userMessage.content,
       role: userMessage.role
+    }).catch(() => {
+      // Message persistence failed (Edge Function down, network error).
+      // The message is already optimistically displayed to the user.
+      // Log but do not block the conversation flow.
+      console.warn("Failed to persist user message — conversation continues in-memory.");
     });
 
     setState(prev => ({
@@ -206,6 +278,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       session_id: state.session.id,
       content: assistantMessage.content,
       role: assistantMessage.role
+    }).catch(() => {
+      console.warn("Failed to persist assistant message — conversation continues in-memory.");
     });
 
     // IMPORTANT: the user message was already appended optimistically above.
@@ -443,6 +517,46 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
   const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(e.target.value);
   };
+
+  // --- Session persistence helpers ---
+  // Conversation state is persisted to sessionStorage so the visitor can
+  // refresh the page without losing their qualification progress.
+  // sessionStorage (not localStorage) is used because the conversation is
+  // tab-scoped — opening a new tab starts a fresh conversation.
+
+  const loadPersistedState = (visitorId: string, tid: string): PersistedChatState | null => {
+    try {
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY(visitorId, tid));
+      if (!raw) return null;
+      return JSON.parse(raw) as PersistedChatState;
+    } catch {
+      return null;
+    }
+  };
+
+  const persistState = useCallback(() => {
+    if (!state.session || !visitorIdRef.current || state.messages.length === 0) return;
+    try {
+      const persisted: PersistedChatState = {
+        messages: state.messages,
+        signals: state.signals,
+        currentStep: state.currentStep,
+        contactInfo: state.contactInfo,
+        sessionId: state.session.id
+      };
+      sessionStorage.setItem(
+        SESSION_STORAGE_KEY(visitorIdRef.current, tenantId),
+        JSON.stringify(persisted)
+      );
+    } catch {
+      // sessionStorage may be full or blocked (private browsing). Non-fatal.
+    }
+  }, [state.messages, state.signals, state.currentStep, state.contactInfo, state.session, tenantId]);
+
+  // Persist state whenever conversation-relevant fields change.
+  useEffect(() => {
+    persistState();
+  }, [persistState]);
 
   return (
     <div className="tq-chatbot-widget">

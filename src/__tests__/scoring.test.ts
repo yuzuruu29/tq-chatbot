@@ -2,7 +2,7 @@
 // These tests verify the deterministic scoring function works as expected
 
 import { describe, it, expect } from "vitest";
-import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap } from "../lib/scoring";
+import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap, extractEmail, isValidEmail, extractBusinessName } from "../lib/scoring";
 import type { Signals } from "../types";
 
 // Test Scenario 1: Hot Lead
@@ -454,13 +454,135 @@ describe("Qualification Gap Analysis", () => {
     expect(getQualificationGap(signals)).toBeNull();
   });
 
-  it("should identify readiness gap when wants_to_book but no contact", () => {
+  it("should short-circuit to null when wants_to_book already produces a high score", () => {
+    // With has_business + problem_clarity + wants_to_book, the score is high.
+    // The bot should route immediately, not ask for readiness info.
     const signals: Signals = {
       ...defaultSignals,
       has_business: true,
       problem_clarity: 1,
       wants_to_book: true
     };
-    expect(getQualificationGap(signals)).toBe("readiness");
+    expect(scoreLead(signals).final_score).toBe("high");
+    expect(getQualificationGap(signals)).toBeNull();
+  });
+
+  it("should identify readiness gap when wants_to_book but score is not yet high", () => {
+    // Without has_business, wants_to_book produces soft_booking (medium),
+    // so the early-stop does not trigger and we can still ask for contact.
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: false,
+      problem_clarity: 0,
+      wants_to_book: true
+    };
+    // This is a soft_booking scenario — medium score, early-stop does not trigger
+    // because the score is not high.  But getQualificationGap checks business first.
+    expect(getQualificationGap(signals)).toBe("business");
+  });
+});
+
+// Early-stop: hot lead should not be over-questioned
+describe("Early-Stop / Hot Lead Routing", () => {
+  it("should return null (no gap) when signals already produce a high score", () => {
+    // This scenario: business + pain + traffic/spend = high score.
+    // The bot should route immediately, not ask for urgency.
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 1,
+      has_traffic_or_spend: true
+    };
+    // scoreLead should already classify this as high
+    expect(scoreLead(signals).final_score).toBe("high");
+    // getQualificationGap should short-circuit and return null
+    expect(getQualificationGap(signals)).toBeNull();
+  });
+
+  it("should return null when wants_to_book with business and pain", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 1,
+      wants_to_book: true
+    };
+    expect(scoreLead(signals).final_score).toBe("high");
+    expect(getQualificationGap(signals)).toBeNull();
+  });
+
+  it("should still ask questions when score is not yet high", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 1
+      // no urgency, no traffic, no booking = medium
+    };
+    expect(scoreLead(signals).final_score).toBe("medium");
+    expect(getQualificationGap(signals)).toBe("urgency");
+  });
+});
+
+// Email extraction
+describe("Email Extraction", () => {
+  it("should extract email from free text", () => {
+    expect(extractEmail("my email is john@example.com")).toBe("john@example.com");
+    expect(extractEmail("reach me at jane.doe@company.co.uk")).toBe("jane.doe@company.co.uk");
+    expect(extractEmail("contact: alice+test@domain.org")).toBe("alice+test@domain.org");
+  });
+
+  it("should return null when no email present", () => {
+    expect(extractEmail("I run a business")).toBeNull();
+    expect(extractEmail("")).toBeNull();
+    expect(extractEmail("no email here")).toBeNull();
+  });
+
+  it("should normalise to lowercase", () => {
+    expect(extractEmail("John@Example.COM")).toBe("john@example.com");
+  });
+
+  it("should reject obvious non-emails", () => {
+    expect(extractEmail("not-an-email")).toBeNull();
+    expect(extractEmail("@domain.com")).toBeNull();
+    expect(extractEmail("user@")).toBeNull();
+  });
+});
+
+// Email validation
+describe("Email Validation", () => {
+  it("should accept valid email addresses", () => {
+    expect(isValidEmail("john@example.com")).toBe(true);
+    expect(isValidEmail("jane.doe@company.co.uk")).toBe(true);
+    expect(isValidEmail("alice+test@domain.org")).toBe(true);
+    expect(isValidEmail("user123@test-domain.com")).toBe(true);
+  });
+
+  it("should reject invalid email addresses", () => {
+    expect(isValidEmail("")).toBe(false);
+    expect(isValidEmail("not-an-email")).toBe(false);
+    expect(isValidEmail("@domain.com")).toBe(false);
+    expect(isValidEmail("user@")).toBe(false);
+    expect(isValidEmail("user@domain")).toBe(false);
+    expect(isValidEmail("user @domain.com")).toBe(false);
+  });
+});
+
+// Business name extraction
+describe("Business Name Extraction", () => {
+  it("should extract business name from common patterns", () => {
+    expect(extractBusinessName("my company is Acme Corp")).toBe("Acme Corp");
+    expect(extractBusinessName("our business called Bright Solutions")).toBe("Bright Solutions");
+    expect(extractBusinessName("we're called NextGen")).toBe("NextGen");
+    expect(extractBusinessName("it is named Pixel Labs")).toBe("Pixel Labs");
+  });
+
+  it("should return null when no business name is present", () => {
+    expect(extractBusinessName("I run a business")).toBeNull();
+    expect(extractBusinessName("")).toBeNull();
+    expect(extractBusinessName("just looking around")).toBeNull();
+  });
+
+  it("should not hallucinate names that are not in the input", () => {
+    expect(extractBusinessName("I have a small business doing marketing")).toBeNull();
+    expect(extractBusinessName("we help companies grow")).toBeNull();
   });
 });

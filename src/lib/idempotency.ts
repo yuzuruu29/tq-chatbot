@@ -65,10 +65,21 @@ const alertTimestamps = new Map<string, number>();
 /**
  * Check whether an alert for this lead should be suppressed.
  * Returns true if the alert should be suppressed (NOT sent).
+ *
+ * Suppression rules:
+ * 1. Low-score leads never get alerts.
+ * 2. Same lead does not trigger duplicate alerts within a 5-minute cooldown.
+ * 3. Booked leads do not trigger follow-up alerts (they have a meeting).
+ * 4. Cancelled bookings re-open alert eligibility (status change in leadService).
+ *
+ * All suppression is logged as funnel events for auditability.
  */
-export function shouldSuppressAlert(leadId: string, score: string): boolean {
+export function shouldSuppressAlert(leadId: string, score: string, status?: string): boolean {
   // Low-score leads never get alerts
   if (score === "low") return true;
+
+  // Booked leads do not get follow-up alerts
+  if (status === "booked") return true;
 
   const now = Date.now();
   const lastAlert = alertTimestamps.get(leadId);

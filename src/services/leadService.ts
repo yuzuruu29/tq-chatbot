@@ -238,7 +238,7 @@ export class LeadService {
   }
 
   private async handleAlert(lead: Lead): Promise<void> {
-    if (shouldSuppressAlert(lead.id, lead.score)) {
+    if (shouldSuppressAlert(lead.id, lead.score, lead.status)) {
       await this.recordEvent({
         tenant_id: lead.tenant_id,
         session_id: lead.session_id,
@@ -335,6 +335,35 @@ export class LeadService {
       lead_id: leadId,
       event_type: "calendly_booked",
       data: { ...bookingData, lead_id: leadId }
+    });
+  }
+
+  /**
+   * Record a cancelled booking and re-open follow-up state.
+   * When a booking is cancelled, the lead transitions back to "contacted"
+   * so that nurture/follow-up sequences can resume.
+   *
+   * Suppression rules:
+   * - booked → no follow-up alert (handled by shouldSuppressAlert)
+   * - cancelled → follow-up may resume (status change re-enables alerts)
+   * - duplicate booking event → idempotent (Edge Function upsert)
+   */
+  public async recordBookingCancellation(
+    leadId: string,
+    sessionId: string,
+    tenantId: string
+  ): Promise<void> {
+    const lead = await this.getLead(leadId);
+    if (lead) {
+      await this.storage.updateLead({ ...lead, status: "contacted" });
+    }
+
+    await this.recordEvent({
+      tenant_id: tenantId,
+      session_id: sessionId,
+      lead_id: leadId,
+      event_type: "booking_cancelled",
+      data: { lead_id: leadId, reason: "Booking cancelled — follow-up may resume" }
     });
   }
 
