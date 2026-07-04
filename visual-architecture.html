@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TQ ChatBot #1 — System Architecture</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+      color: #f8fafc;
+    }
+    .subtitle {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      margin-bottom: 2.5rem;
+    }
+    .diagram {
+      display: flex;
+      gap: 2.5rem;
+      max-width: 1200px;
+      width: 100%;
+      align-items: flex-start;
+    }
+    .flow {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+    .node {
+      width: 100%;
+      max-width: 380px;
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      text-align: center;
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .node:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    }
+    .node-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.25rem;
+    }
+    .node-desc {
+      font-size: 0.78rem;
+      opacity: 0.8;
+      line-height: 1.4;
+    }
+    .arrow {
+      width: 2px;
+      height: 28px;
+      background: #475569;
+      position: relative;
+    }
+    .arrow::after {
+      content: '';
+      position: absolute;
+      bottom: -5px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #475569;
+    }
+    /* Color themes for each layer */
+    .n-website   { background: #1e3a5f; border: 1px solid #3b82f6; }
+    .n-widget    { background: #1e3a5f; border: 1px solid #3b82f6; }
+    .n-engine    { background: #1a3a2a; border: 1px solid #22c55e; }
+    .n-claude    { background: #3b1f4e; border: 1px solid #a855f7; }
+    .n-scoring   { background: #1a3a2a; border: 1px solid #22c55e; }
+    .n-supabase  { background: #1a2e3a; border: 1px solid #06b6d4; }
+    .n-n8n       { background: #3a2a1a; border: 1px solid #f59e0b; }
+    .n-output    { background: #3a1a1a; border: 1px solid #ef4444; }
+    /* Config sidebar */
+    .config-box {
+      width: 280px;
+      flex-shrink: 0;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 12px;
+      padding: 1.25rem;
+      position: sticky;
+      top: 2rem;
+    }
+    .config-box h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #f59e0b;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .config-box h2::before { content: '⚙'; }
+    .config-item {
+      margin-bottom: 0.85rem;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid #334155;
+    }
+    .config-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .config-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      margin-bottom: 0.2rem;
+    }
+    .config-value {
+      font-size: 0.85rem;
+      color: #f8fafc;
+      font-weight: 500;
+    }
+    .config-example {
+      font-size: 0.72rem;
+      color: #64748b;
+      font-style: italic;
+      margin-top: 0.15rem;
+    }
+    /* Legend */
+    .legend {
+      margin-top: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .d-client   { background: #3b82f6; }
+    .d-ai       { background: #a855f7; }
+    .d-logic    { background: #22c55e; }
+    .d-data     { background: #06b6d4; }
+    .d-auto     { background: #f59e0b; }
+    .d-output   { background: #ef4444; }
+    /* Footer */
+    .footer {
+      margin-top: 2.5rem;
+      font-size: 0.72rem;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <h1>TQ ChatBot #1 — System Architecture</h1>
+  <p class="subtitle">Visual flow from client website through AI, scoring, storage, automation, and output</p>
+
+  <div class="diagram">
+    <!-- Main Flow -->
+    <div class="flow">
+
+      <div class="node n-website">
+        <div class="node-title">1. Client Website</div>
+        <div class="node-desc">Landing page with hero, features, and floating chat widget toggle</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-widget">
+        <div class="node-title">2. Embedded Chat Widget</div>
+        <div class="node-desc">Modal overlay chat interface. Creates visitor_id in localStorage, starts chat_session.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-engine">
+        <div class="node-title">3. Conversation Engine</div>
+        <div class="node-desc">Drives qualification flow: greeting → questions → contact capture → routing. Collects signals from user input.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-claude">
+        <div class="node-title">4. Claude Extraction (Optional)</div>
+        <div class="node-desc">LLM extracts structured signals (has_business, urgency, problem_clarity) from natural language. Falls back to deterministic regex.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-scoring">
+        <div class="node-title">5. Deterministic Scoring</div>
+        <div class="node-desc">scoreLead() applies rule-based scoring: high/medium/low → calendly/nurture/guidance. Single source of truth. Fully auditable.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-supabase">
+        <div class="node-title">6. Supabase (Persistence)</div>
+        <div class="node-desc">Stores leads, sessions, messages, events, signals. RLS for multi-tenant isolation. Dashboard queries.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-n8n">
+        <div class="node-title">7. n8n (Automation)</div>
+        <div class="node-desc">Receives events via Edge Function. Triggers alerts, CRM sync, follow-up sequences, booking notifications.</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node n-output">
+        <div class="node-title">8. Calendly / Alerts / Dashboard</div>
+        <div class="node-desc">High leads → Calendly booking. Alerts → Slack/email. Dashboard → real-time analytics (scores, funnel, conversations).</div>
+      </div>
+
+    </div>
+
+    <!-- Config Sidebar -->
+    <div class="config-box">
+      <h2>Client Config Layer</h2>
+
+      <div class="config-item">
+        <div class="config-label">Brand</div>
+        <div class="config-value">Name, logo, colors</div>
+        <div class="config-example">"Acme Corp" / #1e40af</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Prompt</div>
+        <div class="config-value">Greeting + qualification questions</div>
+        <div class="config-example">"What's your biggest challenge?"</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Questions</div>
+        <div class="config-value">Conversation flow steps</div>
+        <div class="config-example">Business? Traffic? Timeline?</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Scoring Thresholds</div>
+        <div class="config-value">Rule boundaries per tenant</div>
+        <div class="config-example">problem_clarity >= 1 for medium</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Calendly URL</div>
+        <div class="config-value">Booking link per tenant</div>
+        <div class="config-example">calendly.com/acme/demo</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Alert Channel</div>
+        <div class="config-value">Slack, email, webhook</div>
+        <div class="config-example">#acme-sales / sales@acme.com</div>
+      </div>
+
+      <div class="config-item">
+        <div class="config-label">Pipeline Labels</div>
+        <div class="config-value">Score and stage names</div>
+        <div class="config-example">Hot / Warm / Exploring</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot d-client"></div> Client-Facing</div>
+    <div class="legend-item"><div class="legend-dot d-ai"></div> AI / LLM</div>
+    <div class="legend-item"><div class="legend-dot d-logic"></div> Deterministic Logic</div>
+    <div class="legend-item"><div class="legend-dot d-data"></div> Data / Storage</div>
+    <div class="legend-item"><div class="legend-dot d-auto"></div> Automation</div>
+    <div class="legend-item"><div class="legend-dot d-output"></div> Output / Integration</div>
+  </div>
+
+  <p class="footer">TQ ChatBot #1 — Architecture Diagram — July 2026</p>
+</body>
+</html>
