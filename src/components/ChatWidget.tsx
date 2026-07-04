@@ -2,8 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { ChatMessage, ChatSession, VisitorContext, Lead } from "../types";
 import { messageService } from "../services/messageService";
 import { leadService } from "../services/leadService";
-import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals } from "../lib/scoring";
+import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals, getQualificationGap } from "../lib/scoring";
 import { calendlyService } from "../services/calendlyService";
+import { makeIdempotencyKey, idempotencyTracker, isSpamSubmission } from "../lib/idempotency";
+import { chatRateLimiter } from "../lib/rateLimit";
+import { getTenantConfig, type TenantConfig } from "../config/tenant";
 import { v4 as uuidv4 } from "uuid";
 
 interface ChatWidgetProps {
@@ -30,6 +33,8 @@ interface ChatState {
 }
 
 export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated, onClose }) => {
+  const config: TenantConfig = getTenantConfig(tenantId);
+
   const [state, setState] = useState<ChatState>({
     messages: [],
     session: null,
@@ -51,6 +56,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
   // but a ref blocks re-entry from rapid clicks/Enter presses that fire before
   // the next state flush.
   const sendingRef = useRef(false);
+
+  // Track whether we have already created a lead for this session to prevent
+  // duplicate lead records from repeated scoring triggers.
+  const leadCreatedRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,7 +96,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     const welcomeMessage: ChatMessage = {
       id: uuidv4(),
       session_id: session.id,
-      content: "Hey, I can help work out whether this is the right system for you. I'll ask a few quick questions, then point you to the best next step.",
+      content: config.welcomeMessage,
       role: "assistant",
       timestamp: new Date().toISOString()
     };
@@ -114,6 +123,35 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     // Synchronous re-entry guard. Stays true for the whole async pipeline.
     if (sendingRef.current) return;
     sendingRef.current = true;
+
+    // Spam guard: suppress empty, garbage, or repeated messages.
+    if (isSpamSubmission(content)) {
+      sendingRef.current = false;
+      return;
+    }
+
+    // Rate limit guard: cap messages per window to bound API cost exposure.
+    const rateLimitResult = chatRateLimiter.check();
+    if (!rateLimitResult.allowed) {
+      const assistantMessage: ChatMessage = {
+        id: uuidv4(),
+        session_id: state.session.id,
+        content: "You are sending messages too quickly. Please wait a moment before continuing.",
+        role: "assistant",
+        timestamp: new Date().toISOString()
+      };
+      setState(prev => ({ ...prev, messages: [...prev.messages, assistantMessage] }));
+      sendingRef.current = false;
+      return;
+    }
+
+    // Idempotency guard: prevent duplicate message persistence on retry.
+    const idemKey = makeIdempotencyKey(state.session.id, content, "user");
+    if (idempotencyTracker.has(idemKey)) {
+      sendingRef.current = false;
+      return;
+    }
+    idempotencyTracker.add(idemKey);
 
     setState(prev => ({ ...prev, isLoading: true }));
 
@@ -154,7 +192,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     }
 
     const scoringResult = scoreLead(updatedSignals);
-    const assistantResponse = generateAssistantResponse(content, updatedSignals, scoringResult);
+    const assistantResponse = generateCloserResponse(content, updatedSignals, scoringResult);
 
     const assistantMessage: ChatMessage = {
       id: uuidv4(),
@@ -179,7 +217,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       isLoading: false
     }));
 
-    if (scoringResult.alert || scoringResult.route === "calendly") {
+    // Only create a lead once per session, and only when scoring triggers an
+    // alert or routes to calendly. Prevents duplicate lead records.
+    if ((scoringResult.alert || scoringResult.route === "calendly") && !leadCreatedRef.current) {
+      leadCreatedRef.current = true;
       await handleLeadCreation(updatedSignals, scoringResult);
     }
 
@@ -197,49 +238,87 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
     void handleSendMessage(value);
   };
 
-  const generateAssistantResponse = (
+  /**
+   * Closer-style response generation.
+   * Uses qualification gap analysis to ask purposeful follow-up questions
+   * instead of generic survey prompts. The bot actively qualifies the lead
+   * based on business context, urgency, fit, and readiness.
+   */
+  const generateCloserResponse = (
     userInput: string,
     signals: typeof defaultSignals,
     scoringResult: ReturnType<typeof scoreLead>
   ): string => {
     const normalized = userInput.toLowerCase();
 
-    if (normalized.includes("hi") || normalized.includes("hello") || normalized.includes("hey")) {
-      return "Hi there. What kind of business are you running, and what are you trying to improve?";
+    // Greeting detection — redirect to qualification
+    if (/^(hi|hello|hey|yo|sup|hiya)\b/i.test(normalized)) {
+      return config.qualificationQuestions.find(q => q.purpose === "business")?.text
+        || "What kind of business are you running, and what are you trying to improve?";
     }
 
-    if (signals.has_business) {
-      if (signals.problem_clarity >= 1) {
-        return "Got it. Can you tell me more about the specific challenge? For example, is it lead quality, follow-up speed, or conversion rates?";
-      }
-      return "Interesting. What kind of challenges are you facing right now? Are you getting traffic but struggling to convert, or something else?";
+    // If we have a clear qualification gap, ask the right next question.
+    const gap = getQualificationGap(signals);
+
+    if (gap === "business") {
+      return "I need to understand what you do first. " + (
+        config.qualificationQuestions.find(q => q.purpose === "business")?.text
+        || "What kind of business are you running, and what are you trying to improve?"
+      );
     }
 
-    if (signals.has_traffic_or_spend) {
-      return "Sounds like you have activity already. What happens after someone shows interest? Is your follow-up process working well?";
+    if (gap === "pain") {
+      return (
+        config.qualificationQuestions.find(q => q.purpose === "pain")?.text
+        || "What is the specific challenge? For example, is it lead quality, follow-up speed, or conversion rates?"
+      );
     }
 
-    if (signals.urgency >= 2) {
-      return "Understood, this sounds time-sensitive. What is the main thing you need to fix right now?";
+    if (gap === "urgency") {
+      return (
+        config.qualificationQuestions.find(q => q.purpose === "urgency")?.text
+        || "How urgent is this? Are you looking to make a change in the next few weeks, or is this more of a future exploration?"
+      );
     }
 
-    if (signals.wants_to_book) {
+    // If score is high and we have enough signals, route toward action.
+    if (scoringResult.final_score === "high") {
+      return "This looks like a strong fit. " + getCalendlyPrompt(signals);
+    }
+
+    if (scoringResult.final_score === "medium" && signals.wants_to_book) {
       return "Happy to set that up. Could you share your name and email so I can get that arranged?";
     }
 
-    if (scoringResult.final_score === "low") {
-      return "Thanks for sharing. To point you in the right direction, could you tell me a bit about your business and what you are looking to achieve?";
-    }
-
     if (scoringResult.final_score === "medium") {
-      return "That helps. What does your current process look like for handling interested visitors? Are you doing it manually or with some tooling?";
+      return "That helps. " + (
+        config.qualificationQuestions.find(q => q.purpose === "readiness")?.text
+        || "What does your current process look like for handling interested visitors?"
+      );
     }
 
-    if (scoringResult.final_score === "high") {
-      return "This sounds like a strong fit. You have a real business need and a clear problem. Would you like to book a quick call to see how this would work for your setup?";
+    // Low score — probe for more context or wrap up gracefully.
+    if (scoringResult.final_score === "low") {
+      return "Thanks for sharing. " + (
+        config.qualificationQuestions.find(q => q.purpose === "business")?.text
+        || "Could you tell me a bit about your business and what you are looking to achieve?"
+      );
     }
 
-    return "Thanks for sharing. What else can you tell me about your situation?";
+    return config.fallbackMessage;
+  };
+
+  /**
+   * Build a Calendly prompt tailored to the lead's signals.
+   */
+  const getCalendlyPrompt = (signals: typeof defaultSignals): string => {
+    if (signals.wants_to_book) {
+      return "You mentioned wanting to book — let me get you to the booking page.";
+    }
+    if (signals.urgency >= 2) {
+      return "Since this is time-sensitive, the fastest next step is a quick call. Let me show you the booking page.";
+    }
+    return "Would you like to book a quick call to see how this would work for your setup?";
   };
 
   const handleLeadCreation = async (
@@ -280,13 +359,17 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
 
     setState(prev => ({ ...prev, isLoading: true }));
 
-    const lead = await leadService.createLead(
-      state.context,
-      state.messages[state.messages.length - 1]?.content || "",
-      state.contactInfo
-    );
-
-    await leadService.routeLead(lead);
+    // Prevent duplicate lead creation on re-submit of contact form.
+    if (!leadCreatedRef.current) {
+      leadCreatedRef.current = true;
+      const lead = await leadService.createLead(
+        state.context,
+        state.messages[state.messages.length - 1]?.content || "",
+        state.contactInfo
+      );
+      await leadService.routeLead(lead);
+      onLeadCreated?.(lead);
+    }
 
     const updatedSignals = { ...state.signals, contact_captured: true };
     const scoringResult = scoreLead(updatedSignals);
@@ -347,8 +430,6 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
         messages: [...prev.messages, assistantMessage]
       }));
     }
-
-    onLeadCreated?.(lead);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,8 +452,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
             <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           </div>
           <div className="tq-chatbot-header-info">
-            <h3>TQ Funnel Assistant</h3>
-            <p>Qualifies and routes leads</p>
+            <h3>{config.botTitle}</h3>
+            <p>{config.botSubtitle}</p>
           </div>
         </div>
         <button className="tq-chatbot-close" onClick={onClose} aria-label="Close chat">
@@ -390,7 +471,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
               {message.content}
             </div>
             <div className="tq-chatbot-message-meta">
-              {message.role === "user" ? "You" : "TQ Bot"} - {" "}
+              {message.role === "user" ? "You" : config.botName} - {" "}
               {new Date(message.timestamp).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit"

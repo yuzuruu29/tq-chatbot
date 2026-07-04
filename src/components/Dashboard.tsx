@@ -292,18 +292,18 @@ export const Dashboard: React.FC = () => {
             </div>
           </section>
 
-          {/* Score Reason Examples */}
+          {/* Scoring Insights with Summary */}
           <section className="tq-dashboard-section">
             <h2>Scoring Insights</h2>
             <div className="tq-scoring-insights">
               {leads
                 .filter(lead => lead.scoring_result?.score_reason)
-                .slice(0, 3)
+                .slice(0, 5)
                 .map((lead) => (
                   <div key={lead.id} className="tq-scoring-insight">
                     <div className="tq-scoring-insight-header">
-                      <span 
-                        className="tq-score-badge" 
+                      <span
+                        className="tq-score-badge"
                         style={{ backgroundColor: getScoreColor(lead.score) }}
                       >
                         {lead.score.toUpperCase()}
@@ -311,10 +311,23 @@ export const Dashboard: React.FC = () => {
                       <span className="tq-scoring-insight-route">
                         → {getRouteLabel(lead.route)}
                       </span>
+                      {lead.scoring_result?.score_value !== undefined && (
+                        <span className="tq-score-numeric">
+                          {lead.scoring_result.score_value}/100
+                        </span>
+                      )}
                     </div>
                     <p className="tq-scoring-insight-reason">
                       {lead.scoring_result?.score_reason}
                     </p>
+                    {lead.scoring_result?.summary && (
+                      <div className="tq-scoring-summary">
+                        <span><strong>Business:</strong> {lead.scoring_result.summary.business_type}</span>
+                        <span><strong>Pain:</strong> {lead.scoring_result.summary.pain_point}</span>
+                        <span><strong>Urgency:</strong> {lead.scoring_result.summary.urgency}</span>
+                        <span><strong>Next:</strong> {lead.scoring_result.summary.next_action}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>

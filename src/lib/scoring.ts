@@ -1,77 +1,233 @@
 // TQ ChatBot #1 - Deterministic Lead Scoring Module
 // Core principle: Final lead scoring must be deterministic, explainable, and auditable
 
-import type { Signals, ScoringResult, Route } from "../types";
+import type { Signals, ScoringResult, Route, ScoreBreakdown, ScoreFactor, LeadSummary } from "../types";
 
 /**
- * Deterministic lead scoring function
- * This is the single source of truth for lead qualification
- * All scoring logic must be contained here for auditability
+ * Build a numeric score breakdown from signals.
+ * Each dimension is 0–20, total 0–100.
+ * Weights: fit 25, urgency 20, pain 25, readiness 15, quality 15.
+ * The breakdown normalises each dimension to its weight.
+ */
+function buildBreakdown(signals: Signals): ScoreBreakdown {
+  // Fit: has_business (0/10) + has_traffic_or_spend (0/10) → scaled to 0–25
+  const fitRaw = (signals.has_business ? 10 : 0) + (signals.has_traffic_or_spend ? 10 : 0);
+  const fit = Math.round((fitRaw / 20) * 25);
+
+  // Urgency: 0/1/2 → scaled to 0–20
+  const urgency = Math.round((signals.urgency / 2) * 20);
+
+  // Pain: problem_clarity 0/1/2 → scaled to 0–25
+  const pain = Math.round((signals.problem_clarity / 2) * 25);
+
+  // Readiness: wants_to_book (0/10) + contact_captured (0/5) → scaled to 0–15
+  const readinessRaw = (signals.wants_to_book ? 10 : 0) + (signals.contact_captured ? 5 : 0);
+  const readiness = Math.round((readinessRaw / 15) * 15);
+
+  // Quality: manual_sales_signal (0/7) + budget_signal (0/8) → scaled to 0–15
+  const qualityRaw = (signals.manual_sales_signal ? 7 : 0) + (signals.budget_signal ? 8 : 0);
+  const quality = Math.round((qualityRaw / 15) * 15);
+
+  return { fit, urgency, pain, readiness, quality };
+}
+
+/**
+ * Build explainable score factors from the breakdown.
+ */
+function buildFactors(signals: Signals, breakdown: ScoreBreakdown): ScoreFactor[] {
+  const factors: ScoreFactor[] = [];
+
+  factors.push({
+    dimension: "fit",
+    value: breakdown.fit,
+    max: 25,
+    reason: signals.has_business
+      ? `Has business${signals.has_traffic_or_spend ? " with active traffic/spend" : ""}`
+      : "No business context established"
+  });
+
+  factors.push({
+    dimension: "urgency",
+    value: breakdown.urgency,
+    max: 20,
+    reason: signals.urgency >= 2
+      ? "High urgency — time-sensitive need"
+      : signals.urgency === 1
+        ? "Some urgency indicated"
+        : "No urgency signal"
+  });
+
+  factors.push({
+    dimension: "pain",
+    value: breakdown.pain,
+    max: 25,
+    reason: signals.problem_clarity >= 2
+      ? "Clear, specific problem stated"
+      : signals.problem_clarity === 1
+        ? "Some indication of a problem"
+        : "No problem articulated yet"
+  });
+
+  factors.push({
+    dimension: "readiness",
+    value: breakdown.readiness,
+    max: 15,
+    reason: signals.wants_to_book
+      ? `Wants to book${signals.contact_captured ? ", contact captured" : ""}`
+      : "No booking intent shown"
+  });
+
+  factors.push({
+    dimension: "quality",
+    value: breakdown.quality,
+    max: 15,
+    reason: signals.budget_signal
+      ? "Budget signal present"
+      : signals.manual_sales_signal
+        ? "Sales/growth language detected"
+        : "No budget or sales signal"
+  });
+
+  return factors;
+}
+
+/**
+ * Generate a lead summary from signals and scoring result.
+ * Captures: business_type, pain_point, urgency, requested_service,
+ * lead_quality, next_action.
+ */
+function buildSummary(signals: Signals, score: ScoringResult): LeadSummary {
+  const businessType = signals.has_business
+    ? signals.has_traffic_or_spend
+      ? "Active business with traffic/spend"
+      : "Business owner"
+    : "No business context";
+
+  const painPoint = signals.problem_clarity >= 2
+    ? "Clear problem identified"
+    : signals.problem_clarity === 1
+      ? "Partial problem indication"
+      : "No specific pain articulated";
+
+  const urgencyLabel = signals.urgency >= 2
+    ? "High — needs solution soon"
+    : signals.urgency === 1
+      ? "Moderate — exploring options"
+      : "Low — no time pressure";
+
+  const requestedService = signals.wants_to_book
+    ? "Wants a call/demo"
+    : score.route === "nurture"
+      ? "Nurture sequence"
+      : score.route === "helpful_guidance"
+        ? "Information/guidance"
+        : "Not specified";
+
+  return {
+    business_type: businessType,
+    pain_point: painPoint,
+    urgency: urgencyLabel,
+    requested_service: requestedService,
+    lead_quality: score.final_score,
+    next_action: getRouteConfig(score.route).description
+  };
+}
+
+/**
+ * Deterministic lead scoring function.
+ * This is the single source of truth for lead qualification.
+ * All scoring logic must be contained here for auditability.
+ *
+ * Returns a full ScoringResult including numeric breakdown and summary.
  */
 export function scoreLead(signals: Signals): ScoringResult {
+  const breakdown = buildBreakdown(signals);
+  const score_value = breakdown.fit + breakdown.urgency + breakdown.pain + breakdown.readiness + breakdown.quality;
+  const factors = buildFactors(signals, breakdown);
+
   // Rule 1: High intent - has business, clear problem, and strong buying/urgency signal
   if (
     signals.has_business &&
     signals.problem_clarity >= 1 &&
     (signals.wants_to_book || signals.urgency >= 2 || signals.has_traffic_or_spend)
   ) {
-    return {
+    const result: ScoringResult = {
       final_score: "high",
       route: "calendly",
       alert: true,
       score_reason:
-        "High intent because the visitor has a real business, a clear problem, and a strong buying or urgency signal."
+        "High intent because the visitor has a real business, a clear problem, and a strong buying or urgency signal.",
+      score_value,
+      breakdown,
+      factors
     };
+    result.summary = buildSummary(signals, result);
+    return result;
   }
 
   // Rule 2: Soft booking - wants to book but business context not established
   if (signals.wants_to_book && !signals.has_business) {
-    return {
+    const result: ScoringResult = {
       final_score: "medium",
       route: "soft_booking",
       alert: false,
       score_reason:
-        "Visitor wants to book, but business context is not established. Offer booking path without marking as qualified."
+        "Visitor wants to book, but business context is not established. Offer booking path without marking as qualified.",
+      score_value,
+      breakdown,
+      factors
     };
+    result.summary = buildSummary(signals, result);
+    return result;
   }
 
   // Rule 3: Medium intent - has business and problem, but unclear urgency/readiness
   if (signals.has_business && signals.problem_clarity >= 1) {
-    return {
+    const result: ScoringResult = {
       final_score: "medium",
       route: "nurture",
       alert: false,
       score_reason:
-        "Medium intent because a business and problem exist, but urgency or readiness is unclear."
+        "Medium intent because a business and problem exist, but urgency or readiness is unclear.",
+      score_value,
+      breakdown,
+      factors
     };
+    result.summary = buildSummary(signals, result);
+    return result;
   }
 
   // Rule 4: Low intent - default case
-  return {
+  const result: ScoringResult = {
     final_score: "low",
     route: "helpful_guidance",
     alert: false,
     score_reason:
-      "Low intent because there is no clear business, problem, or buying signal yet."
+      "Low intent because there is no clear business, problem, or buying signal yet.",
+    score_value,
+    breakdown,
+    factors
   };
+  result.summary = buildSummary(signals, result);
+  return result;
 }
 
 /**
- * Extract signals from user input using deterministic pattern matching
- * This is a fallback when LLM extraction is not available
+ * Extract signals from user input using deterministic pattern matching.
+ * This is a fallback when LLM extraction is not available.
  */
 export function extractSignalsFromText(input: string): Partial<Signals> {
   const normalized = input.toLowerCase();
   const signals: Partial<Signals> = {};
 
   // Business detection
-  signals.has_business = 
+  signals.has_business =
     /(?:run|own|have|operate|manage|founded)\s+(?:a|an|the|my)?\s*(?:business|company|startup|brand|agency|ecommerce|store|shop)/i.test(normalized) ||
     /(?:business|company|startup|brand|agency|ecommerce|store|shop)\s+(?:owner|founder|ceo|director)/i.test(normalized) ||
     /(?:i have a|i run a|i own a)\s*(?:small )?(?:business|company|service business|startup|brand|agency|ecommerce|store|shop)/i.test(normalized);
 
   // Traffic or spend detection
-  signals.has_traffic_or_spend = 
+  signals.has_traffic_or_spend =
     /(?:spending|spend|investing|running)\s+(?:on|in)?\s*(?:ads|advertising|marketing|paid|ppc|facebook ads|google ads|traffic)/i.test(normalized) ||
     /(?:getting|receiving|have|having)\s+(?:traffic|visitors|leads|customers)/i.test(normalized) ||
     /(?:budget|spend|spending)\s+(?:\$|dollars|usd|monthly|annual)/i.test(normalized) ||
@@ -98,26 +254,26 @@ export function extractSignalsFromText(input: string): Partial<Signals> {
   }
 
   // Booking intent detection
-  signals.wants_to_book = 
+  signals.wants_to_book =
     /(?:book|schedule|reserve|set up|arrange)\s+(?:a|an|the)?\s*(?:call|meeting|demo|consultation|chat)/i.test(normalized) ||
     /(?:talk|speak|connect|meet)\s+(?:soon|now|today|tomorrow)/i.test(normalized) ||
     /calendly/i.test(normalized);
 
   // Manual sales signal detection
-  signals.manual_sales_signal = 
+  signals.manual_sales_signal =
     /(?:sales|revenue|profit|growth|scale|expand)/i.test(normalized) &&
     /(?:team|process|funnel|pipeline)/i.test(normalized);
 
   // Budget signal detection
-  signals.budget_signal = 
+  signals.budget_signal =
     /(?:budget|money|funds|investment|roi|return on investment)/i.test(normalized);
 
   return signals;
 }
 
 /**
- * Merge extracted signals with existing signals
- * Extracted signals update existing ones when provided
+ * Merge extracted signals with existing signals.
+ * Extracted signals update existing ones when provided.
  */
 export function mergeSignals(
   existing: Signals,
@@ -137,7 +293,7 @@ export function mergeSignals(
 }
 
 /**
- * Default signals for a new conversation
+ * Default signals for a new conversation.
  */
 export const defaultSignals: Signals = {
   has_business: false,
@@ -151,7 +307,7 @@ export const defaultSignals: Signals = {
 };
 
 /**
- * Get route configuration based on scoring result
+ * Get route configuration based on scoring result.
  */
 export function getRouteConfig(route: Route) {
   const configs = {
@@ -181,4 +337,17 @@ export function getRouteConfig(route: Route) {
     }
   };
   return configs[route];
+}
+
+/**
+ * Determine what qualification gap remains in the signals.
+ * Returns the next purpose the closer should pursue, or null if
+ * enough signals exist for a confident score.
+ */
+export function getQualificationGap(signals: Signals): "business" | "pain" | "urgency" | "readiness" | null {
+  if (!signals.has_business) return "business";
+  if (signals.problem_clarity < 1) return "pain";
+  if (signals.urgency < 1 && !signals.wants_to_book && !signals.has_traffic_or_spend) return "urgency";
+  if (!signals.contact_captured && signals.wants_to_book) return "readiness";
+  return null;
 }

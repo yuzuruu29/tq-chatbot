@@ -1,11 +1,13 @@
 // TQ ChatBot #1 - Lead Service
 // Handles lead creation, scoring, and routing
+// Includes suppression logic for duplicate alerts and spam filtering.
 
 import { v4 as uuidv4 } from "uuid";
 import type { Lead, Signals, VisitorContext, FunnelEvent } from "../types";
 import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals } from "../lib/scoring";
 import { supabaseService } from "../lib/supabase";
 import { messageService } from "./messageService";
+import { shouldSuppressAlert } from "../lib/idempotency";
 
 // In-memory lead storage for development
 class InMemoryLeadStorage {
@@ -289,12 +291,28 @@ export class LeadService {
   }
 
   private async handleAlert(lead: Lead): Promise<void> {
+    // Suppression: same lead should not trigger repeated alerts within
+    // the cooldown window. Low-score alerts are always suppressed.
+    if (shouldSuppressAlert(lead.id, lead.score)) {
+      await this.recordEvent({
+        tenant_id: lead.tenant_id,
+        session_id: lead.session_id,
+        lead_id: lead.id,
+        event_type: "alert_suppressed",
+        data: {
+          score: lead.score,
+          reason: "Suppressed by cooldown or low score"
+        }
+      });
+      return;
+    }
+
     // Record alert event
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
       lead_id: lead.id,
-      event_type: "lead_scored", // Using existing event type
+      event_type: "alert_triggered",
       data: {
         score: lead.score,
         reason: lead.scoring_result.score_reason

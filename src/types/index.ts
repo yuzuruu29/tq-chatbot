@@ -3,6 +3,23 @@
 export type LeadScore = "low" | "medium" | "high";
 export type Route = "calendly" | "soft_booking" | "nurture" | "helpful_guidance";
 
+export type ScoreDimension = "fit" | "urgency" | "pain" | "readiness" | "quality";
+
+export type ScoreBreakdown = {
+  fit: number;
+  urgency: number;
+  pain: number;
+  readiness: number;
+  quality: number;
+};
+
+export type ScoreFactor = {
+  dimension: ScoreDimension;
+  value: number;
+  max: number;
+  reason: string;
+};
+
 export type Signals = {
   has_business: boolean;
   has_traffic_or_spend: boolean;
@@ -20,6 +37,19 @@ export type ScoringResult = {
   route: Route;
   alert: boolean;
   score_reason: string;
+  score_value: number;
+  breakdown: ScoreBreakdown;
+  factors: ScoreFactor[];
+  summary?: LeadSummary;
+};
+
+export type LeadSummary = {
+  business_type?: string;
+  pain_point?: string;
+  urgency: string;
+  requested_service?: string;
+  lead_quality: LeadScore;
+  next_action: string;
 };
 
 export type ChatMessage = {
@@ -57,6 +87,7 @@ export type Lead = {
     company?: string;
   };
   scoring_result: ScoringResult;
+  summary?: LeadSummary;
   status: "new" | "contacted" | "booked" | "converted" | "rejected";
   created_at: string;
   updated_at: string;
@@ -67,7 +98,7 @@ export type FunnelEvent = {
   tenant_id: string;
   session_id: string;
   lead_id?: string;
-  event_type: 
+  event_type:
     | "chat_started"
     | "message_sent"
     | "lead_captured"
@@ -76,7 +107,10 @@ export type FunnelEvent = {
     | "calendly_clicked"
     | "calendly_booked"
     | "nurture_shown"
-    | "booking_option_shown";
+    | "booking_option_shown"
+    | "helpful_guidance_shown"
+    | "alert_triggered"
+    | "alert_suppressed";
   data: Record<string, unknown>;
   timestamp: string;
 };
@@ -129,3 +163,8 @@ export type VisitorContext = {
   session_id: string;
   tenant_id: string;
 };
+
+// Idempotency key used to suppress duplicate network writes.
+// Generated from stable session/message identifiers so retries do not create
+// duplicate records.
+export type IdempotencyKey = string;

@@ -2,7 +2,7 @@
 // These tests verify the deterministic scoring function works as expected
 
 import { describe, it, expect } from "vitest";
-import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals } from "../lib/scoring";
+import { scoreLead, extractSignalsFromText, defaultSignals, mergeSignals, getQualificationGap } from "../lib/scoring";
 import type { Signals } from "../types";
 
 // Test Scenario 1: Hot Lead
@@ -348,5 +348,119 @@ describe("Signal Merging", () => {
     expect(merged.has_business).toBe(true);
     expect(merged.has_traffic_or_spend).toBe(false); // Unchanged
     expect(merged.problem_clarity).toBe(0); // Unchanged
+  });
+});
+
+// Scoring Breakdown and Summary
+describe("Scoring Breakdown", () => {
+  it("should return a numeric score_value for high-intent lead", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      has_traffic_or_spend: true,
+      problem_clarity: 2,
+      urgency: 2,
+      wants_to_book: true,
+      contact_captured: true,
+      budget_signal: true
+    };
+
+    const result = scoreLead(signals);
+
+    expect(result.score_value).toBeGreaterThan(0);
+    expect(result.score_value).toBeLessThanOrEqual(100);
+    expect(result.breakdown).toBeDefined();
+    expect(result.breakdown.fit).toBeGreaterThanOrEqual(0);
+    expect(result.breakdown.urgency).toBeGreaterThanOrEqual(0);
+    expect(result.breakdown.pain).toBeGreaterThanOrEqual(0);
+    expect(result.breakdown.readiness).toBeGreaterThanOrEqual(0);
+    expect(result.breakdown.quality).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should return a low score_value for low-intent lead", () => {
+    const signals: Signals = { ...defaultSignals };
+    const result = scoreLead(signals);
+
+    expect(result.score_value).toBeLessThan(40);
+  });
+
+  it("should return factors with reasons", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 2
+    };
+    const result = scoreLead(signals);
+
+    expect(result.factors).toBeDefined();
+    expect(result.factors.length).toBe(5);
+    result.factors.forEach(factor => {
+      expect(factor.reason).toBeTruthy();
+      expect(factor.value).toBeGreaterThanOrEqual(0);
+      expect(factor.max).toBeGreaterThan(0);
+    });
+  });
+
+  it("should populate summary for all score levels", () => {
+    const highSignals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      has_traffic_or_spend: true,
+      problem_clarity: 2,
+      urgency: 2,
+      wants_to_book: true
+    };
+    const highResult = scoreLead(highSignals);
+    expect(highResult.summary).toBeDefined();
+    expect(highResult.summary?.business_type).toContain("Active business");
+    expect(highResult.summary?.lead_quality).toBe("high");
+
+    const lowSignals: Signals = { ...defaultSignals };
+    const lowResult = scoreLead(lowSignals);
+    expect(lowResult.summary).toBeDefined();
+    expect(lowResult.summary?.lead_quality).toBe("low");
+  });
+});
+
+// Qualification Gap Analysis
+describe("Qualification Gap Analysis", () => {
+  it("should identify business gap when no business signal", () => {
+    const signals: Signals = { ...defaultSignals };
+    expect(getQualificationGap(signals)).toBe("business");
+  });
+
+  it("should identify pain gap when business but no problem", () => {
+    const signals: Signals = { ...defaultSignals, has_business: true };
+    expect(getQualificationGap(signals)).toBe("pain");
+  });
+
+  it("should identify urgency gap when business + problem but no urgency/readiness", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 1
+    };
+    expect(getQualificationGap(signals)).toBe("urgency");
+  });
+
+  it("should return null when all gaps are filled", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 2,
+      urgency: 2,
+      contact_captured: true
+    };
+    expect(getQualificationGap(signals)).toBeNull();
+  });
+
+  it("should identify readiness gap when wants_to_book but no contact", () => {
+    const signals: Signals = {
+      ...defaultSignals,
+      has_business: true,
+      problem_clarity: 1,
+      wants_to_book: true
+    };
+    expect(getQualificationGap(signals)).toBe("readiness");
   });
 });

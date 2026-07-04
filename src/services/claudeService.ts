@@ -2,6 +2,7 @@
 // Safe stub implementation for LLM-based signal extraction
 
 import type { Signals, LeadScore } from "../types";
+import { extractSignalsFromText } from "../lib/scoring";
 
 /**
  * Claude extraction prompt for structured signal extraction
@@ -122,58 +123,12 @@ export class ClaudeService {
   }
 
   /**
-   * Deterministic extraction fallback
-   * This ensures we always have signal extraction even without Claude
+   * Deterministic extraction fallback.
+   * Delegates to the canonical extractSignalsFromText in scoring.ts
+   * to avoid duplicate, divergent regex patterns.
    */
   private deterministicExtraction(userMessage: string): Partial<Signals> {
-    const normalized = userMessage.toLowerCase();
-    const signals: Partial<Signals> = {};
-
-    // Business detection
-    signals.has_business = 
-      /(?:run|own|have|operate|manage|founded)\s+(?:a|an|the|my)?\s*(?:business|company|startup|brand|agency|ecommerce|store|shop)/i.test(normalized) ||
-      /(?:business|company|startup|brand|agency|ecommerce|store|shop)\s+(?:owner|founder|ceo|director)/i.test(normalized);
-
-    // Traffic or spend detection
-    signals.has_traffic_or_spend = 
-      /(?:spending|spend|investing|running)\s+(?:on|in)?\s*(?:ads|advertising|marketing|paid|ppc|facebook ads|google ads|traffic)/i.test(normalized) ||
-      /(?:getting|receiving|have|having)\s+(?:traffic|visitors|leads|customers)/i.test(normalized) ||
-      /(?:budget|spend|spending)\s+(?:\$|dollars|usd|monthly|annual)/i.test(normalized);
-
-    // Problem clarity detection
-    if (/\b(problem|issue|challenge|struggle|pain|difficulty|trouble)\b/i.test(normalized)) {
-      signals.problem_clarity = 2;
-    } else if (/\b(weak|poor|bad|not working|broken|inefficient)\s+(?:funnel|conversion|sales|process)/i.test(normalized)) {
-      signals.problem_clarity = 1;
-    } else {
-      signals.problem_clarity = 0;
-    }
-
-    // Urgency detection
-    if (/\b(urgent|asap|immediately|right now|today|tomorrow|this week|soon|quickly)\b/i.test(normalized)) {
-      signals.urgency = 2;
-    } else if (/\b(soon|eventually|next week|next month|planning|considering)\b/i.test(normalized)) {
-      signals.urgency = 1;
-    } else {
-      signals.urgency = 0;
-    }
-
-    // Booking intent detection
-    signals.wants_to_book = 
-      /(?:book|schedule|reserve|set up|arrange)\s+(?:a|an|the)?\s*(?:call|meeting|demo|consultation|chat)/i.test(normalized) ||
-      /(?:talk|speak|connect|meet)\s+(?:soon|now|today|tomorrow)/i.test(normalized) ||
-      /calendly/i.test(normalized);
-
-    // Manual sales signal detection
-    signals.manual_sales_signal = 
-      /(?:sales|revenue|profit|growth|scale|expand)/i.test(normalized) &&
-      /(?:team|process|funnel|pipeline)/i.test(normalized);
-
-    // Budget signal detection
-    signals.budget_signal = 
-      /(?:budget|money|funds|investment|roi|return on investment)/i.test(normalized);
-
-    return signals;
+    return extractSignalsFromText(userMessage);
   }
 
 }

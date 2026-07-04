@@ -57,11 +57,13 @@ This document tracks key architectural and implementation decisions made during 
 ## Implementation Decisions
 
 ### 5. Scoring Function Implementation
-**Decision**: Use the provided scoring function with clear rule hierarchy
+**Decision**: Use a 4-rule priority cascade with numeric breakdown
 **Rationale**: 
 - Matches the specified requirements exactly
 - Rules are ordered by priority (high intent first)
 - Each rule has clear, testable conditions
+- Numeric score_value (0–100) provides granularity for dashboard display
+- ScoreBreakdown (fit/urgency/pain/readiness/quality) makes every score explainable
 
 **Rules**:
 1. High: has_business + problem_clarity >= 1 + (wants_to_book OR urgency >= 2 OR has_traffic_or_spend)
@@ -69,16 +71,23 @@ This document tracks key architectural and implementation decisions made during 
 3. Medium: has_business + problem_clarity >= 1
 4. Low: Default case
 
+**Numeric Dimensions** (0–100 total):
+- Fit (0–25): has_business + has_traffic_or_spend
+- Urgency (0–20): urgency signal strength
+- Pain (0–25): problem_clarity
+- Readiness (0–15): wants_to_book + contact_captured
+- Quality (0–15): manual_sales_signal + budget_signal
+
 **Status**: ✅ Implemented
 
 ### 6. Signal Extraction
-**Decision**: Implement both deterministic pattern matching and LLM stub
+**Decision**: Single canonical extraction function in scoring.ts; claudeService delegates to it
 **Rationale**: 
-- Deterministic extraction works without LLM API
-- LLM stub can be extended with real API calls later
-- Pattern matching covers common cases reliably
+- Eliminates duplicate, divergent regex patterns between scoring.ts and claudeService.ts
+- ClaudeService.deterministicExtraction() now delegates to extractSignalsFromText()
+- LLM extraction stub remains ready for Edge Function deployment
 
-**Status**: ✅ Implemented
+**Status**: ✅ Implemented (duplicate removed)
 
 ### 7. Chat Widget Design
 **Decision**: Modal overlay with embedded chat interface
@@ -100,11 +109,31 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented
 
+### 9. Closer vs Questionnaire Design
+**Decision**: Bot behaves as a guided funnel closer, not a passive intake form
+**Rationale**:
+- A questionnaire collects data; a closer qualifies and routes
+- The bot uses getQualificationGap() to determine what signal is missing
+- It asks purposeful follow-up questions based on the gap (business → pain → urgency → readiness)
+- Once enough signals exist, it routes toward the appropriate action (Calendly, nurture, guidance)
+- Responses are drawn from tenant config qualification questions, not hardcoded generic prompts
+
+**Key Behaviours**:
+- Greets, then immediately asks about business context
+- If no business: asks about business
+- If business but no pain: asks about specific challenge
+- If business + pain but no urgency: asks about timeline
+- If high score: routes to Calendly with a tailored prompt
+- If wants_to_book: captures contact, then shows Calendly
+- Never feels like a static survey
+
+**Status**: ✅ Implemented
+
 ---
 
 ## Security Decisions
 
-### 9. Row Level Security (RLS)
+### 10. Row Level Security (RLS)
 **Decision**: Implement comprehensive RLS policies for all tables
 **Rationale**: 
 - Multi-tenant architecture requires data isolation
@@ -119,7 +148,7 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented in schema.sql
 
-### 10. Environment Variables
+### 11. Environment Variables
 **Decision**: Use Vite's import.meta.env for client-side environment variables
 **Rationale**: 
 - Secure way to expose configuration to client
@@ -129,14 +158,17 @@ This document tracks key architectural and implementation decisions made during 
 **Variables**:
 - VITE_SUPABASE_URL: Supabase project URL
 - VITE_SUPABASE_ANON_KEY: Supabase anonymous key
-- VITE_CLAUDE_API_KEY: Claude API key (for LLM extraction)
 - VITE_CALENDLY_URL: Calendly embed URL
-- VITE_N8N_API_KEY: n8n API key
-- VITE_N8N_BASE_URL: n8n base URL
+
+**Server-only (no VITE_ prefix):**
+- CLAUDE_API_KEY: Edge Function secret
+- N8N_WEBHOOK_URL: Edge Function secret
+- N8N_WEBHOOK_SECRET: Edge Function secret
+- SUPABASE_SERVICE_ROLE_KEY: Edge Function secret
 
 **Status**: ✅ Implemented
 
-### 11. API Key Handling
+### 12. API Key Handling
 **Decision**: Never expose sensitive API keys client-side
 **Rationale**: 
 - Client-side code can be inspected by anyone
@@ -145,11 +177,41 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented
 
+### 13. Public Endpoint Security Posture
+**Decision**: Browser MVP uses in-memory storage; production uses Edge Functions
+**Rationale**:
+- The public chat endpoint has no authentication
+- Writing directly to Supabase from the browser with the anon key would require permissive RLS policies that expose data
+- Instead, the browser stores messages in-memory; production uses an Edge Function with the service-role key
+
+**Production Requirements**:
+1. Supabase Edge Function /api/chat persists messages with service-role key
+2. Edge Function enforces per-IP and per-session rate limits
+3. CDN/WAF layer (Cloudflare) with bot detection
+4. Supabase Database Function for per-visitor write quotas
+
+**Client-Side Guards (UX, not security)**:
+- Rate limiter: 30 messages per 60 seconds per browser tab
+- Idempotency tracker: prevents duplicate message persistence on retry
+- Spam filter: rejects empty, garbage, and repeated-character submissions
+- Duplicate-submit ref: prevents re-entry from rapid clicks
+
+**Status**: ✅ Client-side guards implemented; production Edge Function is a launch blocker
+
+### 14. Supabase Service-Role Key
+**Decision**: Service-role key never exposed to browser; privileged writes go through Edge Functions
+**Rationale**: 
+- Service-role key bypasses RLS — it can read/write ALL tenant data
+- Browser should only use anon key + RLS policies
+- Privileged operations (alerts, followup_jobs, tenant admin) use Edge Functions
+
+**Status**: ✅ Documented and enforced
+
 ---
 
 ## Integration Decisions
 
-### 12. Calendly Integration
+### 15. Calendly Integration
 **Decision**: Implement embed widget with event tracking
 **Rationale**: 
 - Calendly provides easy scheduling
@@ -158,7 +220,7 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented as stub (ready for real integration)
 
-### 13. n8n Integration
+### 16. n8n Integration
 **Decision**: Define event contracts for workflow automation
 **Rationale**: 
 - n8n can handle complex workflows
@@ -167,7 +229,7 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented as stub (ready for real integration)
 
-### 14. Claude Integration
+### 17. Claude Integration
 **Decision**: Implement extraction prompt with safe fallback
 **Rationale**: 
 - Claude can improve signal extraction accuracy
@@ -178,9 +240,122 @@ This document tracks key architectural and implementation decisions made during 
 
 ---
 
+## Hardening Decisions (2026-07-05)
+
+### 18. Idempotency Strategy
+**Decision**: Client-side idempotency key + in-memory deduplication tracker
+**Rationale**:
+- Repeated submit/click/Enter must not create duplicate user messages
+- Repeated network retry must not create duplicate lead records
+- Key format: `${sessionId}:${role}:${content.slice(0,200).toLowerCase()}`
+- Tracker uses a Set with 5000-entry cap (FIFO eviction)
+
+**Production Enhancement**:
+- Supabase UNIQUE constraint on (session_id, content_hash, role) in chat_messages
+- Edge Function validates idempotency key in request header
+
+**Status**: ✅ Implemented
+
+### 19. Suppression Strategy
+**Decision**: Suppress duplicate alerts and spam submissions
+**Rationale**:
+- Same lead should not trigger repeated alerts within a 5-minute cooldown
+- Low-score leads never get alerts (they route to helpful_guidance)
+- Spam submissions (empty, garbage, repeated characters) are silently dropped
+- Suppression events are recorded as "alert_suppressed" for auditability
+
+**Rules**:
+1. Alert cooldown: 5-minute window per lead_id
+2. Low-score suppression: score=low never fires alerts
+3. Spam filter: length < 2, no alphanumeric, or repeated same character (5+)
+4. Duplicate message: idempotency key prevents re-persistence
+
+**Suppression does NOT silently erase high-intent leads**: only low-score and within-cooldown alerts are suppressed. All suppression is logged as funnel events.
+
+**Status**: ✅ Implemented
+
+### 20. Rate Limiting Design
+**Decision**: Client-side rate limiter (30 messages/60s) with documented production path
+**Rationale**:
+- Browser MVP has no backend, so rate limiting is client-side only
+- Prevents accidental rapid-fire from normal users
+- Bounds API cost exposure during development
+
+**Production Path** (launch blocker):
+1. Edge Function /api/chat with per-IP rate limiting
+2. Supabase RPC with per-visitor write quotas
+3. CDN/WAF layer with bot detection
+
+**Status**: ✅ Client-side implemented; production path documented
+
+### 21. PII and RLS Posture
+**Decision**: Document PII fields and enforce access control
+**PII Fields Identified**:
+- leads.contact_info (name, email, phone, company)
+- chat_messages.content (conversation text)
+- leads.signals (business details)
+- leads.scoring_result (qualification data)
+
+**Current Posture**:
+- All tables have RLS enabled
+- Policies require auth.uid() for all reads/writes
+- Browser MVP uses in-memory storage (no PII in database without auth)
+- Dashboard reads require authenticated access
+- Anonymous key alone cannot read or write any data with current policies
+
+**Launch Blockers**:
+- Dashboard must NOT be deployed publicly without Supabase Auth
+- Public chat endpoint must use Edge Function for persistence (not direct Supabase writes)
+
+**Status**: ✅ Documented in schema.sql and this log
+
+### 22. Summary Quality
+**Decision**: Generate structured lead summaries from signals and scoring
+**Rationale**:
+- Dashboard depends on summary quality for human reviewers
+- Summary captures: business_type, pain_point, urgency, requested_service, lead_quality, next_action
+- Generated deterministically from the same signals used for scoring
+- Displayed in Dashboard "Scoring Insights" section
+
+**Seed Scenario Coverage**:
+- High-intent lead: "Active business with traffic/spend" + "Clear problem" + "High urgency"
+- Medium-intent lead: "Business owner" + "Partial problem" + "Moderate urgency"
+- Low-intent lead: "No business context" + "No pain" + "No time pressure"
+- Spam/empty: Filtered before scoring (isSpamSubmission)
+
+**Status**: ✅ Implemented
+
+### 23. Multi-Tenant Config Seam
+**Decision**: Centralize tenant-specific values in src/config/tenant.ts
+**Rationale**:
+- Avoids hardcoding business-specific values throughout components
+- Clean path for: tenant name, niche, qualification questions, scoring weights, route rules, dashboard labels
+- ChatWidget imports and uses TenantConfig for welcome messages, bot name, qualification questions
+- getTenantConfig() returns the right config by id
+
+**What Changes Per Tenant**:
+- Brand name, bot title, bot subtitle
+- Welcome and fallback messages
+- Qualification questions (business, pain, urgency, readiness, contact)
+- Scoring weights (fit, urgency, pain, readiness, quality)
+- Score thresholds (high: 70, medium: 40)
+- Route rules and dashboard labels
+- Calendly URL, nurture email template
+
+**What Does NOT Change**:
+- Scoring logic (4-rule cascade)
+- Signal extraction regex
+- Idempotency and suppression logic
+- RLS policies
+- Chat widget component structure
+
+**Status**: ✅ Implemented
+
+---
+
 ## Testing Decisions
 
-### 15. Testing Framework
+### 24. Testing Framework
 **Decision**: Use Vitest for unit and integration tests
 **Rationale**: 
 - Fast and modern testing framework
@@ -191,7 +366,7 @@ This document tracks key architectural and implementation decisions made during 
 **Alternatives Considered**: Jest, Cypress, Playwright
 **Status**: ✅ Implemented
 
-### 16. Test Coverage
+### 25. Test Coverage
 **Decision**: Focus on core scoring logic and services
 **Rationale**: 
 - Scoring function is critical and must be thoroughly tested
@@ -209,7 +384,7 @@ This document tracks key architectural and implementation decisions made during 
 
 ## Deployment Decisions
 
-### 17. Build Configuration
+### 26. Build Configuration
 **Decision**: Use Vite's default build configuration
 **Rationale**: 
 - Optimized for production
@@ -218,7 +393,7 @@ This document tracks key architectural and implementation decisions made during 
 
 **Status**: ✅ Implemented
 
-### 18. Environment Configuration
+### 27. Environment Configuration
 **Decision**: Provide .env.example with all required variables
 **Rationale**: 
 - Makes setup easier for other developers
@@ -229,88 +404,60 @@ This document tracks key architectural and implementation decisions made during 
 
 ---
 
-## Future Considerations
+## Motion and UX Polish
 
-### 19. Scalability
-- Consider adding caching for frequently accessed data
-- Evaluate database indexing for performance
-- Monitor and optimize query performance
+### 28. Chat Widget Motion
+**Decision**: Subtle CSS-only animations for chat open, message entrance, and interactive states
+**Rationale**:
+- Chat open: opacity + translateY + slight scale (240ms, ease-out)
+- Message entrance: opacity + translateY (200ms)
+- Toggle hover: translateY(-2px) + scale(1.04)
+- Toggle press: scale(0.98)
+- Send button hover: translateY(-1px), press: scale(0.98)
+- All motion disabled under `@media (prefers-reduced-motion: reduce)`
 
-### 20. Internationalization
-- Add support for multiple languages
-- Localize chat messages and UI
-- Handle different date/time formats
+**Rules**:
+- No emojis, particles, starfields, or bouncing gimmicks
+- Duration range: 160ms–280ms
+- Easing: cubic-bezier(0.16, 1, 0.3, 1)
+- Hover lift maximum: translateY(-2px)
+- Press state maximum: scale(0.98)
+- No horizontal overflow
+- Focus rings remain visible
 
-### 21. Advanced Analytics
-- Add more detailed funnel analytics
-- Implement cohort analysis
-- Add A/B testing capabilities
-
-### 22. Machine Learning
-- Use historical data to improve scoring
-- Implement anomaly detection
-- Add predictive lead scoring
+**Status**: ✅ Implemented
 
 ---
 
-## Security Hardening Decisions
+## What Is Production-Ready Now
 
-### 23. Environment Variable Security
-**Decision**: Separate client-safe (VITE_) from server-only env vars
-**Rationale**: 
-- Vite exposes any VITE_ prefixed variable to the browser bundle
-- API keys, webhook secrets, and service-role keys must NEVER be client-exposed
-- Claude, n8n, and Supabase service-role operations must go through Edge Functions
+1. Deterministic scoring with numeric breakdown and explainable reasons
+2. Closer-style conversation flow with qualification gap analysis
+3. Idempotent message persistence (client-side)
+4. Alert suppression with cooldown and audit trail
+5. Spam submission filtering
+6. Client-side rate limiting (30 msgs/60s)
+7. Multi-tenant config seam (wired into ChatWidget)
+8. Lead summary generation for dashboard
+9. RLS-enabled Supabase schema
+10. Subtle, professional motion with reduced-motion support
 
-**Client-safe (VITE_):**
-- `VITE_SUPABASE_URL` — project URL
-- `VITE_SUPABASE_ANON_KEY` — anonymous key (RLS-protected)
-- `VITE_CALENDLY_URL` — embed URL
+## What Remains a Launch Blocker
 
-**Server-only (no prefix):**
-- `CLAUDE_API_KEY` — Edge Function secret
-- `N8N_WEBHOOK_URL` — Edge Function secret
-- `N8N_WEBHOOK_SECRET` — Edge Function secret
-- `SUPABASE_SERVICE_ROLE_KEY` — Edge Function secret
+1. **Supabase Edge Function for public chat persistence**: Browser writes to in-memory storage only. Production needs an Edge Function to persist messages with the service-role key.
+2. **Server-side rate limiting**: Client-side rate limiting is a UX guard, not a security boundary. Production needs Edge Function + WAF.
+3. **Dashboard authentication**: Dashboard reads lead PII. Must NOT be deployed publicly without Supabase Auth.
+4. **n8n webhook integration**: Currently stubbed. Production needs Edge Function to dispatch events with N8N_WEBHOOK_SECRET.
+5. **Claude API integration**: Currently stubbed. Production needs Edge Function to call Claude with CLAUDE_API_KEY.
 
-**Status**: ✅ Implemented and hardened
+## What Was Intentionally Not Done
 
-### 24. Claude Service Security Model
-**Decision**: Browser never holds Claude API key; extraction calls go through Edge Function
-**Rationale**: 
-- API key in browser = anyone can steal and abuse it
-- Edge Function holds key server-side, validates requests, returns structured response
-- Browser MVP uses deterministic regex as safe fallback (no API key needed)
-
-**Production flow:**
-1. Browser → POST /api/extract-signals (Supabase Edge Function)
-2. Edge Function → Claude API with CLAUDE_API_KEY
-3. Edge Function → returns structured JSON signals
-
-**Status**: ✅ Implemented (stub ready for Edge Function deployment)
-
-### 25. n8n Service Security Model
-**Decision**: Browser never holds n8n webhook URL or secret; events go through Edge Function
-**Rationale**: 
-- Webhook URL in browser = anyone can spam your n8n workflows
-- Edge Function holds webhook URL and secret, validates requests, forwards events
-- Browser MVP logs events to console as safe fallback
-
-**Production flow:**
-1. Browser → POST /api/n8n-dispatch (Supabase Edge Function)
-2. Edge Function → validates N8N_WEBHOOK_SECRET
-3. Edge Function → forwards event to n8n webhook
-
-**Status**: ✅ Implemented (stub ready for Edge Function deployment)
-
-### 26. Supabase Service-Role Key
-**Decision**: Service-role key never exposed to browser; privileged writes go through Edge Functions
-**Rationale**: 
-- Service-role key bypasses RLS — it can read/write ALL tenant data
-- Browser should only use anon key + RLS policies
-- Privileged operations (alerts, followup_jobs, tenant admin) use Edge Functions
-
-**Status**: ✅ Documented and enforced
+1. **No new heavy dependencies**: All changes use existing packages.
+2. **No emojis or marketing copy**: Bot tone is direct and professional.
+3. **No particles, starfields, or excessive glow**: Motion is subtle and restrained.
+4. **No changes to approved landing-page copy**: LandingPage.tsx content unchanged.
+5. **No weakening of existing tests**: chatWidget.test.tsx regression test preserved.
+6. **No removal of duplicate-send fix**: sendingRef guard preserved and extended.
 
 ---
 
@@ -326,18 +473,17 @@ This document tracks key architectural and implementation decisions made during 
 | 2026-07-04 | Documentation | ✅ Complete |
 | 2026-07-04 | Security hardening | ✅ Complete |
 | 2026-07-04 | Deliverables documentation | ✅ Complete |
+| 2026-07-05 | Closer-style funnel logic | ✅ Complete |
+| 2026-07-05 | Scoring type mismatch fix + numeric breakdown | ✅ Complete |
+| 2026-07-05 | Idempotency layer | ✅ Complete |
+| 2026-07-05 | Suppression layer | ✅ Complete |
+| 2026-07-05 | Rate limiting | ✅ Complete |
+| 2026-07-05 | PII/RLS posture documentation | ✅ Complete |
+| 2026-07-05 | Summary quality | ✅ Complete |
+| 2026-07-05 | Multi-tenant config wiring | ✅ Complete |
+| 2026-07-05 | Motion/UX polish | ✅ Complete |
 
 ---
 
-## Open Questions
-
-1. **Rate Limiting**: Should we implement rate limiting for the chat widget?
-2. **Session Timeout**: What should be the session timeout duration?
-3. **Data Retention**: How long should we retain chat data?
-4. **GDPR Compliance**: What additional measures are needed for GDPR compliance?
-5. **Accessibility**: Should we add more accessibility features to the chat widget?
-
----
-
-*Last Updated: 2026-07-04*
-*Version: 1.0.0*
+*Last Updated: 2026-07-05*
+*Version: 2.0.0*

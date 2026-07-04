@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS funnel_events (
     'nurture_shown',
     'booking_option_shown',
     'helpful_guidance_shown',
-    'alert_triggered'
+    'alert_triggered',
+    'alert_suppressed'
   )),
   data JSONB NOT NULL DEFAULT '{}',
   timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -188,6 +189,31 @@ CREATE INDEX IF NOT EXISTS idx_followup_jobs_scheduled_at ON followup_jobs(sched
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================
+--
+-- SECURITY POSTURE:
+-- All tables have RLS enabled. The policies below require Supabase Auth
+-- (auth.uid()) for all reads and writes. This is intentional:
+--
+-- 1. PUBLIC CHAT ENDPOINT: The browser chat widget does NOT write directly
+--    to Supabase. It uses in-memory storage in the browser MVP. In production,
+--    chat messages are persisted through a Supabase Edge Function that holds
+--    the service-role key and enforces its own validation + rate limiting.
+--
+-- 2. DASHBOARD: Requires authenticated access. Do NOT deploy the dashboard
+--    at a public URL without Supabase Auth enabled. The dashboard reads
+--    lead data which contains PII (names, emails, business details).
+--
+-- 3. SERVICE-ROLE KEY: Never exposed to the browser. Lives only in Edge
+--    Functions. Bypasses RLS, so Edge Functions must validate inputs.
+--
+-- 4. ANON KEY: Used only for the Supabase client initialization. With
+--    these RLS policies, the anon key alone cannot read or write any data.
+--    All meaningful access goes through Edge Functions or authenticated users.
+--
+-- LAUNCH BLOCKER: If deploying the public chat endpoint without Edge Functions,
+-- you MUST add permissive INSERT policies for chat_messages and chat_sessions
+-- that allow anonymous inserts with tenant_id validation and rate limiting.
+-- This is intentionally NOT done here to prevent accidental data exposure.
 
 -- Enable RLS on all tables
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
