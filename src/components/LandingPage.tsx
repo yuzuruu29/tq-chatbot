@@ -194,7 +194,7 @@ export const LandingPage: React.FC = () => {
         <div className="tq-chatbot-overlay">
           <div className="tq-chatbot-container">
             <ChatWidget
-              tenantId="default"
+              tenantId="00000000-0000-0000-0000-000000000000"
               onLeadCreated={handleLeadCreated}
               onClose={() => setShowChat(false)}
             />

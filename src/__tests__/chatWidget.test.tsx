@@ -41,7 +41,7 @@ describe("ChatWidget - single send of 'hello'", () => {
   it("renders exactly one user bubble and one assistant bubble after one submit", async () => {
     const onClose = () => {};
     await act(async () => {
-      root.render(<ChatWidget tenantId="tq-test" onClose={onClose} />);
+      root.render(<ChatWidget tenantId="00000000-0000-0000-0000-000000000000" onClose={onClose} />);
     });
     // Let the welcome-message initialization complete
     await flush();

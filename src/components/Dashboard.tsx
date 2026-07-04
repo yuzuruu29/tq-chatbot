@@ -31,7 +31,7 @@ export const Dashboard: React.FC = () => {
       // For now, we'll use the in-memory data from services
       
       // Get leads (in-memory storage)
-      const allLeads = await leadService.getLeadsByTenant("default");
+      const allLeads = await leadService.getLeadsByTenant("00000000-0000-0000-0000-000000000000");
       setLeads(allLeads);
 
       // Calculate metrics based on time range

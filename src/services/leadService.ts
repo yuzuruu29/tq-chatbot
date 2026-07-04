@@ -1,6 +1,9 @@
 // TQ ChatBot #1 - Lead Service
-// Handles lead creation, scoring, and routing
+// Handles lead creation, scoring, and routing.
 // Includes suppression logic for duplicate alerts and spam filtering.
+//
+// Write path: Edge Function (service-role key) → Supabase → in-memory fallback.
+// Read path:  In-memory (always fast; Supabase reads are for dashboard only).
 
 import { v4 as uuidv4 } from "uuid";
 import type { Lead, Signals, VisitorContext, FunnelEvent } from "../types";
@@ -8,6 +11,7 @@ import { scoreLead, defaultSignals, extractSignalsFromText, mergeSignals } from 
 import { supabaseService } from "../lib/supabase";
 import { messageService } from "./messageService";
 import { shouldSuppressAlert } from "../lib/idempotency";
+import { edgeCreateLead, edgeRecordEvent } from "../lib/edgeClient";
 
 // In-memory lead storage for development
 class InMemoryLeadStorage {
@@ -50,94 +54,14 @@ class InMemoryLeadStorage {
   }
 }
 
-// Supabase lead storage implementation
-class SupabaseLeadStorage {
-  async createLead(lead: Omit<Lead, "id" | "created_at" | "updated_at">): Promise<Lead> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("leads")
-      .insert(lead)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to create lead: ${error.message}`);
-    }
-    return data as Lead;
-  }
-
-  async getLead(leadId: string): Promise<Lead | null> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("leads")
-      .select("*")
-      .eq("id", leadId)
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-    return data as Lead;
-  }
-
-  async updateLead(lead: Lead): Promise<Lead> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("leads")
-      .update({
-        score: lead.score,
-        route: lead.route,
-        signals: lead.signals,
-        contact_info: lead.contact_info,
-        scoring_result: lead.scoring_result,
-        status: lead.status,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", lead.id)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update lead: ${error.message}`);
-    }
-    return data as Lead;
-  }
-
-  async recordEvent(event: Omit<FunnelEvent, "id" | "timestamp">): Promise<FunnelEvent> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("funnel_events")
-      .insert(event)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to record event: ${error.message}`);
-    }
-    return data as FunnelEvent;
-  }
-
-  async getLeadsByTenant(tenantId: string): Promise<Lead[]> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("leads")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      throw new Error(`Failed to get leads: ${error.message}`);
-    }
-    return data as Lead[];
-  }
-}
-
 export class LeadService {
-  private storage: InMemoryLeadStorage | SupabaseLeadStorage;
+  private storage: InMemoryLeadStorage;
   private static instance: LeadService;
+  private edgeAvailable: boolean;
 
   private constructor() {
-    this.storage = supabaseService.isInitialized() ? new SupabaseLeadStorage() : new InMemoryLeadStorage();
+    this.storage = new InMemoryLeadStorage();
+    this.edgeAvailable = supabaseService.isInitialized();
   }
 
   public static getInstance(): LeadService {
@@ -148,7 +72,9 @@ export class LeadService {
   }
 
   /**
-   * Create a new lead from chat context and user input
+   * Create a new lead from chat context and user input.
+   * Tries Edge Function first (server-side idempotency + persistence),
+   * falls back to in-memory.
    */
   public async createLead(
     context: VisitorContext,
@@ -157,10 +83,10 @@ export class LeadService {
   ): Promise<Lead> {
     // Extract signals from user input
     const extractedSignals = extractSignalsFromText(userInput);
-    
+
     // Start with default signals and merge with extracted ones
     let signals: Signals = mergeSignals(defaultSignals, extractedSignals);
-    
+
     // If contact info is provided, mark as captured
     if (contactInfo.email || contactInfo.name || contactInfo.phone) {
       signals = { ...signals, contact_captured: true };
@@ -169,7 +95,50 @@ export class LeadService {
     // Score the lead
     const scoringResult = scoreLead(signals);
 
-    // Create lead object
+    // Try Edge Function for persistence
+    if (this.edgeAvailable) {
+      const edgeResult = await edgeCreateLead(
+        context.session_id,
+        context.visitor_id,
+        context.tenant_id,
+        scoringResult.final_score,
+        scoringResult.route,
+        signals as unknown as Record<string, unknown>,
+        contactInfo as Record<string, unknown>,
+        scoringResult as unknown as Record<string, unknown>
+      );
+
+      if (edgeResult) {
+        const lead = edgeResult.lead;
+
+        // Record events locally for dashboard
+        await this.storage.recordEvent({
+          tenant_id: context.tenant_id,
+          session_id: context.session_id,
+          lead_id: lead.id,
+          event_type: "lead_captured",
+          data: { score: scoringResult.final_score, route: scoringResult.route }
+        });
+        await this.storage.recordEvent({
+          tenant_id: context.tenant_id,
+          session_id: context.session_id,
+          lead_id: lead.id,
+          event_type: "lead_scored",
+          data: { score: scoringResult.final_score, route: scoringResult.route, reason: scoringResult.score_reason }
+        });
+
+        // Update local session
+        const session = await messageService.getSession(context.session_id);
+        if (session) {
+          await messageService.updateSession({ ...session, lead_id: lead.id, status: "completed" });
+        }
+
+        return lead;
+      }
+      // Edge Function unavailable — fall through
+    }
+
+    // In-memory fallback
     const lead: Omit<Lead, "id" | "created_at" | "updated_at"> = {
       tenant_id: context.tenant_id,
       session_id: context.session_id,
@@ -182,42 +151,27 @@ export class LeadService {
       status: "new"
     };
 
-    // Create the lead
     const newLead = await this.storage.createLead(lead);
 
-    // Record lead creation event
     await this.recordEvent({
       tenant_id: context.tenant_id,
       session_id: context.session_id,
       lead_id: newLead.id,
       event_type: "lead_captured",
-      data: {
-        score: scoringResult.final_score,
-        route: scoringResult.route
-      }
+      data: { score: scoringResult.final_score, route: scoringResult.route }
     });
 
-    // Record scoring event
     await this.recordEvent({
       tenant_id: context.tenant_id,
       session_id: context.session_id,
       lead_id: newLead.id,
       event_type: "lead_scored",
-      data: {
-        score: scoringResult.final_score,
-        route: scoringResult.route,
-        reason: scoringResult.score_reason
-      }
+      data: { score: scoringResult.final_score, route: scoringResult.route, reason: scoringResult.score_reason }
     });
 
-    // Update session with lead ID
     const session = await messageService.getSession(context.session_id);
     if (session) {
-      await messageService.updateSession({
-        ...session,
-        lead_id: newLead.id,
-        status: "completed"
-      });
+      await messageService.updateSession({ ...session, lead_id: newLead.id, status: "completed" });
     }
 
     return newLead;
@@ -235,13 +189,9 @@ export class LeadService {
       throw new Error(`Lead not found: ${leadId}`);
     }
 
-    // Merge new signals with existing ones
     const updatedSignals = mergeSignals(lead.signals, newSignals);
-    
-    // Re-score the lead
     const scoringResult = scoreLead(updatedSignals);
 
-    // Update lead
     const updatedLead: Lead = {
       ...lead,
       signals: updatedSignals,
@@ -259,7 +209,6 @@ export class LeadService {
   public async routeLead(lead: Lead): Promise<void> {
     const { route, alert } = lead.scoring_result;
 
-    // Record routing event
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
@@ -268,12 +217,10 @@ export class LeadService {
       data: { route, alert }
     });
 
-    // Handle alert for high-value leads
     if (alert) {
       await this.handleAlert(lead);
     }
 
-    // Route-specific actions
     switch (route) {
       case "calendly":
         await this.handleCalendlyRoute(lead);
@@ -291,35 +238,25 @@ export class LeadService {
   }
 
   private async handleAlert(lead: Lead): Promise<void> {
-    // Suppression: same lead should not trigger repeated alerts within
-    // the cooldown window. Low-score alerts are always suppressed.
     if (shouldSuppressAlert(lead.id, lead.score)) {
       await this.recordEvent({
         tenant_id: lead.tenant_id,
         session_id: lead.session_id,
         lead_id: lead.id,
         event_type: "alert_suppressed",
-        data: {
-          score: lead.score,
-          reason: "Suppressed by cooldown or low score"
-        }
+        data: { score: lead.score, reason: "Suppressed by cooldown or low score" }
       });
       return;
     }
 
-    // Record alert event
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
       lead_id: lead.id,
       event_type: "alert_triggered",
-      data: {
-        score: lead.score,
-        reason: lead.scoring_result.score_reason
-      }
+      data: { score: lead.score, reason: lead.scoring_result.score_reason }
     });
 
-    // In production, this would trigger n8n workflow or webhook
     console.log(`ALERT: High-value lead detected!`, {
       leadId: lead.id,
       score: lead.score,
@@ -329,7 +266,6 @@ export class LeadService {
   }
 
   private async handleCalendlyRoute(lead: Lead): Promise<void> {
-    // Show Calendly widget
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
@@ -340,7 +276,6 @@ export class LeadService {
   }
 
   private async handleSoftBookingRoute(lead: Lead): Promise<void> {
-    // Show booking option without alert
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
@@ -351,7 +286,6 @@ export class LeadService {
   }
 
   private async handleNurtureRoute(lead: Lead): Promise<void> {
-    // Capture email for nurture sequence
     if (lead.contact_info.email) {
       await this.recordEvent({
         tenant_id: lead.tenant_id,
@@ -360,26 +294,20 @@ export class LeadService {
         event_type: "nurture_shown",
         data: { email: lead.contact_info.email }
       });
-
-      // In production, this would create a followup job
       console.log(`Nurture sequence started for: ${lead.contact_info.email}`);
     }
   }
 
   private async handleHelpfulGuidanceRoute(lead: Lead): Promise<void> {
-    // No specific action, just provide helpful content
     await this.recordEvent({
       tenant_id: lead.tenant_id,
       session_id: lead.session_id,
       lead_id: lead.id,
-      event_type: "lead_scored", // Using existing event type
+      event_type: "lead_scored",
       data: { lead_id: lead.id }
     });
   }
 
-  /**
-   * Record Calendly click event
-   */
   public async recordCalendlyClick(leadId: string, sessionId: string, tenantId: string): Promise<void> {
     await this.recordEvent({
       tenant_id: tenantId,
@@ -390,25 +318,17 @@ export class LeadService {
     });
   }
 
-  /**
-   * Record Calendly booking event
-   */
   public async recordCalendlyBooking(
     leadId: string,
     sessionId: string,
     tenantId: string,
     bookingData: Record<string, unknown>
   ): Promise<void> {
-    // Update lead status
     const lead = await this.getLead(leadId);
     if (lead) {
-      await this.storage.updateLead({
-        ...lead,
-        status: "booked"
-      });
+      await this.storage.updateLead({ ...lead, status: "booked" });
     }
 
-    // Record booking event
     await this.recordEvent({
       tenant_id: tenantId,
       session_id: sessionId,
@@ -418,30 +338,38 @@ export class LeadService {
     });
   }
 
-  /**
-   * Get lead by ID
-   */
   public async getLead(leadId: string): Promise<Lead | null> {
     return this.storage.getLead(leadId);
   }
 
-  /**
-   * Get all leads for a tenant
-   */
   public async getLeadsByTenant(tenantId: string): Promise<Lead[]> {
     return this.storage.getLeadsByTenant(tenantId);
   }
 
   /**
-   * Record a funnel event
+   * Record a funnel event.
+   * Tries Edge Function first for server-side persistence, falls back to in-memory.
    */
   public async recordEvent(event: Omit<FunnelEvent, "id" | "timestamp">): Promise<FunnelEvent> {
+    if (this.edgeAvailable) {
+      const edgeEvent = await edgeRecordEvent(
+        event.tenant_id,
+        event.session_id,
+        event.event_type,
+        event.data,
+        event.lead_id
+      );
+      if (edgeEvent) {
+        // Also store locally
+        return this.storage.recordEvent(event);
+      }
+    }
     return this.storage.recordEvent(event);
   }
 
   // Reinitialize storage based on Supabase status
   public reinitializeStorage(): void {
-    this.storage = supabaseService.isInitialized() ? new SupabaseLeadStorage() : new InMemoryLeadStorage();
+    this.edgeAvailable = supabaseService.isInitialized();
   }
 }
 

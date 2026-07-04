@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
 import LandingPage from "./components/LandingPage";
 import Dashboard from "./components/Dashboard";
+import AuthGate from "./components/AuthGate";
 import { supabaseService } from "./lib/supabase";
 import { messageService } from "./services/messageService";
 import { leadService } from "./services/leadService";
@@ -67,7 +68,7 @@ const App: React.FC = () => {
         <main className="tq-main-content">
           <Routes>
             <Route path="/" element={<LandingPage />} />
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<AuthGate><Dashboard /></AuthGate>} />
           </Routes>
         </main>
         <Footer />

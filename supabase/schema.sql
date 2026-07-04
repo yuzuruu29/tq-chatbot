@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS lead_scoring_signals (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
   signal_type TEXT NOT NULL,
-  value BOOLEAN OR SMALLINT,
+  value JSONB NOT NULL DEFAULT 'false',
   confidence DECIMAL(3,2) NOT NULL DEFAULT 1.00 CHECK (confidence >= 0 AND confidence <= 1),
   source TEXT NOT NULL CHECK (source IN ('manual', 'llm', 'deterministic')),
   timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -187,6 +187,63 @@ CREATE INDEX IF NOT EXISTS idx_followup_jobs_status ON followup_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_followup_jobs_scheduled_at ON followup_jobs(scheduled_at);
 
 -- ============================================
+-- RATE LIMITS TABLE
+-- Server-side rate limiting for the public chat endpoint.
+-- The Edge Function calls check_rate_limit() before every write.
+-- ============================================
+CREATE TABLE IF NOT EXISTS rate_limits (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  identifier TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT date_trunc('minute', NOW()),
+  request_count INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(identifier, window_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON rate_limits(identifier);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window_start ON rate_limits(window_start);
+
+-- Rate limit check function.
+-- Returns true if the request is allowed, false if rate-limited.
+-- Increments the counter atomically.
+CREATE OR REPLACE FUNCTION check_rate_limit(
+  p_identifier TEXT,
+  p_window_minutes INTEGER DEFAULT 1,
+  p_max_requests INTEGER DEFAULT 30
+) RETURNS BOOLEAN AS $$
+DECLARE
+  v_window_start TIMESTAMPTZ;
+  v_count INTEGER;
+BEGIN
+  v_window_start := date_trunc('minute', NOW());
+
+  -- Try to increment existing row
+  UPDATE rate_limits
+  SET request_count = request_count + 1
+  WHERE identifier = p_identifier
+    AND window_start = v_window_start
+  RETURNING request_count INTO v_count;
+
+  IF v_count IS NOT NULL THEN
+    RETURN v_count <= p_max_requests;
+  END IF;
+
+  -- No row exists — create one
+  INSERT INTO rate_limits (identifier, window_start, request_count)
+  VALUES (p_identifier, v_window_start, 1)
+  ON CONFLICT (identifier, window_start) DO UPDATE
+    SET request_count = rate_limits.request_count + 1
+  RETURNING request_count INTO v_count;
+
+  RETURN v_count <= p_max_requests;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Cleanup: delete rate limit rows older than 10 minutes.
+-- Run periodically (e.g., via pg_cron or a scheduled Edge Function).
+-- DELETE FROM rate_limits WHERE window_start < NOW() - INTERVAL '10 minutes';
+
+-- ============================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================
 --
@@ -223,6 +280,12 @@ ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lead_scoring_signals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE funnel_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE followup_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
+
+-- RLS for rate_limits: only service role can read/write
+CREATE POLICY "Rate limits service role only" ON rate_limits
+  FOR ALL
+  USING (auth.jwt() ->> 'role' = 'service_role');
 
 -- RLS Policies for tenants
 -- Allow authenticated users to read their own tenant

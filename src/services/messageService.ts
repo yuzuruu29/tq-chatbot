@@ -1,11 +1,15 @@
 // TQ ChatBot #1 - Message Persistence Service
-// Abstraction layer for chat message storage
+// Abstraction layer for chat message storage.
+//
+// Write path: Edge Function (service-role key) → Supabase → in-memory fallback.
+// Read path:  In-memory (always fast; Supabase reads are for dashboard only).
 
 import { v4 as uuidv4 } from "uuid";
 import type { ChatMessage, ChatSession, VisitorContext } from "../types";
 import { supabaseService } from "../lib/supabase";
+import { edgeCreateSession, edgeCreateMessage } from "../lib/edgeClient";
 
-// In-memory storage for development when Supabase is not configured
+// In-memory storage for development when Edge Function is not available
 class InMemoryStorage {
   private sessions: Map<string, ChatSession> = new Map();
   private messages: Map<string, ChatMessage[]> = new Map();
@@ -39,7 +43,7 @@ class InMemoryStorage {
       id: uuidv4(),
       timestamp: new Date().toISOString()
     };
-    
+
     if (!this.messages.has(message.session_id)) {
       this.messages.set(message.session_id, []);
     }
@@ -56,110 +60,17 @@ class InMemoryStorage {
   }
 }
 
-// Supabase-based storage implementation
-class SupabaseStorage {
-  async createSession(context: VisitorContext): Promise<ChatSession> {
-    const client = supabaseService.getClient();
-    const session: Omit<ChatSession, "id" | "created_at" | "updated_at"> = {
-      visitor_id: context.visitor_id,
-      tenant_id: context.tenant_id,
-      status: "active",
-      lead_id: undefined,
-      current_step: undefined
-    };
-
-    const { data, error } = await client
-      .from("chat_sessions")
-      .insert(session)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to create session: ${error.message}`);
-    }
-
-    return data as ChatSession;
-  }
-
-  async getSession(sessionId: string): Promise<ChatSession | null> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("chat_sessions")
-      .select("*")
-      .eq("id", sessionId)
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-    return data as ChatSession;
-  }
-
-  async updateSession(session: ChatSession): Promise<ChatSession> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("chat_sessions")
-      .update({
-        status: session.status,
-        lead_id: session.lead_id,
-        current_step: session.current_step,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", session.id)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update session: ${error.message}`);
-    }
-    return data as ChatSession;
-  }
-
-  async createMessage(message: Omit<ChatMessage, "id" | "timestamp">): Promise<ChatMessage> {
-    const client = supabaseService.getClient();
-    const chatMessage: Omit<ChatMessage, "id" | "timestamp"> = {
-      ...message
-    };
-
-    const { data, error } = await client
-      .from("chat_messages")
-      .insert(chatMessage)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to create message: ${error.message}`);
-    }
-    return data as ChatMessage;
-  }
-
-  async getMessages(sessionId: string): Promise<ChatMessage[]> {
-    const client = supabaseService.getClient();
-    const { data, error } = await client
-      .from("chat_messages")
-      .select("*")
-      .eq("session_id", sessionId)
-      .order("timestamp", { ascending: true });
-
-    if (error) {
-      throw new Error(`Failed to get messages: ${error.message}`);
-    }
-    return data as ChatMessage[];
-  }
-
-  async getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.getMessages(sessionId);
-  }
-}
-
 // Message Service - main abstraction
 export class MessageService {
-  private storage: InMemoryStorage | SupabaseStorage;
+  private storage: InMemoryStorage;
   private static instance: MessageService;
+  private edgeAvailable: boolean;
 
   private constructor() {
-    // Use Supabase if initialized, otherwise fall back to in-memory
-    this.storage = supabaseService.isInitialized() ? new SupabaseStorage() : new InMemoryStorage();
+    this.storage = new InMemoryStorage();
+    // Edge Function availability is checked lazily on first write.
+    // In dev mode (no Supabase configured), we never attempt Edge calls.
+    this.edgeAvailable = supabaseService.isInitialized();
   }
 
   public static getInstance(): MessageService {
@@ -169,7 +80,21 @@ export class MessageService {
     return MessageService.instance;
   }
 
+  /**
+   * Create a session.
+   * Tries Edge Function first (persists to Supabase), falls back to in-memory.
+   */
   public async createSession(context: VisitorContext): Promise<ChatSession> {
+    if (this.edgeAvailable) {
+      const edgeSession = await edgeCreateSession(context.visitor_id, context.tenant_id);
+      if (edgeSession) {
+        // Also store locally for fast reads
+        this.storage.createSession(context);
+        return edgeSession;
+      }
+      // Edge Function unavailable — fall through to in-memory
+      this.edgeAvailable = false;
+    }
     return this.storage.createSession(context);
   }
 
@@ -181,7 +106,35 @@ export class MessageService {
     return this.storage.updateSession(session);
   }
 
+  /**
+   * Create a message.
+   * Tries Edge Function first (with server-side idempotency + rate limiting),
+   * falls back to in-memory.
+   */
   public async createMessage(message: Omit<ChatMessage, "id" | "timestamp">): Promise<ChatMessage> {
+    if (this.edgeAvailable) {
+      // We need tenant_id for the Edge Function. Look it up from the session.
+      const session = await this.storage.getSession(message.session_id);
+      const tenantId = session?.tenant_id || "00000000-0000-0000-0000-000000000000";
+
+      const edgeResult = await edgeCreateMessage(
+        message.session_id,
+        message.content,
+        message.role,
+        tenantId
+      );
+
+      if (edgeResult) {
+        if (edgeResult.duplicate) {
+          // Server detected duplicate — return existing message without re-persisting locally
+          return edgeResult.message;
+        }
+        // Also store locally for fast reads
+        this.storage.createMessage(message);
+        return edgeResult.message;
+      }
+      // Edge Function unavailable — fall through to in-memory
+    }
     return this.storage.createMessage(message);
   }
 
@@ -195,7 +148,7 @@ export class MessageService {
 
   // Reinitialize storage based on Supabase status
   public reinitializeStorage(): void {
-    this.storage = supabaseService.isInitialized() ? new SupabaseStorage() : new InMemoryStorage();
+    this.edgeAvailable = supabaseService.isInitialized();
   }
 }
 

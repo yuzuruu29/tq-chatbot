@@ -120,7 +120,8 @@ const defaultDashboardLabels: DashboardLabels = {
 // This is the live build of "System Entry One" and the bridge to future
 // niche-specific engines.
 export const techQuartersConfig: TenantConfig = {
-  id: "default",
+  // Must match the seed UUID in supabase/schema.sql
+  id: "00000000-0000-0000-0000-000000000000",
   name: "TechQuarters",
   niche: "tech-quarters",
   calendlyUrl: "https://calendly.com/tq-chatbot",
@@ -197,7 +198,11 @@ export const genericConfig: TenantConfig = {
 };
 
 export function getTenantConfig(id?: string): TenantConfig {
-  if (id === "default" || id === "tech-quarters") {
+  if (
+    id === "default" ||
+    id === "tech-quarters" ||
+    id === "00000000-0000-0000-0000-000000000000"
+  ) {
     return techQuartersConfig;
   }
   return genericConfig;
