@@ -2,6 +2,7 @@
 // Event contract and safe stub implementation for n8n workflow automation
 
 import type { Lead, FunnelEvent } from "../types";
+import { logger } from "../lib/logger";
 
 /**
  * n8n Event Contract
@@ -181,8 +182,8 @@ export class N8nService {
     //   body: JSON.stringify(event)
     // });
 
-    // Browser MVP: log event
-    console.log("n8n event logged (stub):", event.event_type, event.payload);
+    // Browser MVP: log event type only (no payload)
+    logger.debug("n8n event logged (stub)", { eventType: event.event_type, tenantId: event.tenant_id });
     return {
       success: false,
       message: "n8n not configured — browser MVP uses safe stub",

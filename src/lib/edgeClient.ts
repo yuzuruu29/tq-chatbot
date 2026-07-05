@@ -8,6 +8,7 @@
 // Falls back gracefully when the Edge Function is not deployed (dev mode).
 
 import type { ChatMessage, ChatSession, Lead, FunnelEvent } from "../types";
+import { logger } from "./logger";
 
 // Read env vars lazily so tests can stub them with vi.stubEnv().
 function getSupabaseUrl(): string {
@@ -118,8 +119,7 @@ async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      console.warn(`chat-api ${response.status}:`, errorBody.error || response.statusText);
+      logger.warn("chat-api error", { status: response.status, action: payload.action });
       return null;
     }
 
@@ -128,9 +128,9 @@ async function callChatApi(payload: EdgePayload): Promise<EdgeResponse | null> {
     clearTimeout(timeoutId);
     // Network error, timeout, or function not deployed — signal fallback
     if (err instanceof DOMException && err.name === "AbortError") {
-      console.warn("chat-api request timed out after 10s");
+      logger.warn("chat-api request timed out after 10s");
     } else {
-      console.warn("chat-api unavailable, falling back to in-memory:", err);
+      logger.warn("chat-api unavailable, falling back to in-memory");
     }
     return null;
   }

@@ -1,6 +1,8 @@
 // TQ ChatBot #1 - Calendly Service
 // Safe stub implementation for Calendly integration
 
+import { logger } from "../lib/logger";
+
 interface CalendlyBookingData {
   eventId: string;
   eventType: string;
@@ -76,10 +78,7 @@ export class CalendlyService {
    */
   public async showWidget(_visitorId: string): Promise<void> {
     this.shownCount++;
-    console.log(`Calendly widget shown`);
-    
-    // In production, this would trigger analytics
-    // For now, just log the event
+    logger.debug("Calendly widget shown", { shownCount: this.shownCount });
   }
 
   /**
@@ -87,7 +86,7 @@ export class CalendlyService {
    */
   public async recordClick(_visitorId: string): Promise<void> {
     this.clickedCount++;
-    console.log(`Calendly widget clicked`);
+    logger.debug("Calendly widget clicked", { clickedCount: this.clickedCount });
   }
 
   /**
@@ -97,7 +96,7 @@ export class CalendlyService {
   public async handleBooking(bookingData: CalendlyBookingData): Promise<void> {
     this.bookedCount++;
     this.events.push(bookingData);
-    console.log(`Calendly booking confirmed:`, bookingData);
+    logger.info("Calendly booking confirmed", { eventId: bookingData.eventId, eventType: bookingData.eventType });
   }
 
   /**

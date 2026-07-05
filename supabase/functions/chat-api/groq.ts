@@ -126,7 +126,7 @@ async function callGroq(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.warn(`Groq API ${response.status}: ${response.statusText}`);
+      console.warn(`Groq API error: ${response.status}`);
       return null;
     }
 
@@ -137,7 +137,7 @@ async function callGroq(
     if (err instanceof DOMException && err.name === "AbortError") {
       console.warn("Groq request timed out");
     } else {
-      console.warn("Groq request failed:", err);
+      console.warn("Groq request failed");
     }
     return null;
   }
@@ -186,7 +186,7 @@ export async function groqExtractSignals(
 
     return parsed;
   } catch {
-    console.warn("Groq returned invalid JSON:", raw.slice(0, 200));
+    console.warn("Groq returned invalid JSON (first 50 chars):", raw.slice(0, 50).replace(/[^\x20-\x7E]/g, ""));
     return null;
   }
 }

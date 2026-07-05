@@ -87,7 +87,7 @@ async function checkRateLimit(
   });
 
   if (error) {
-    console.error("Rate limit check failed:", error.message);
+    console.error("Rate limit check failed");
     // Fail open — allow the request if rate limiting is broken
     return { allowed: true, remaining: maxRequests };
   }
@@ -380,7 +380,7 @@ Deno.serve(async (req: Request) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
-    console.error("chat-api error:", err);
+    console.error("chat-api error:", err instanceof Error ? err.message : "Internal server error");
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

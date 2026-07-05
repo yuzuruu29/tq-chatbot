@@ -1,8 +1,24 @@
-// TQ ChatBot #1 - Dashboard Component
+// TQ ChatBot — Dashboard Component
+// Sidebar layout matching the Open Design reference
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import type { Lead, DashboardMetrics, LeadScore } from "../types";
 import { leadService } from "../services/leadService";
 import { calendlyService } from "../services/calendlyService";
+import { logger } from "../lib/logger";
+
+// ─── Sidebar Icons ───────────────────────────────────────────
+const IconGrid = () => <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>;
+const IconChatSidebar = () => <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+const IconUsers = () => <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
+const IconActivity = () => <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const IconBarChart = () => <svg viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>;
+const IconCalendar = () => <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
+const IconSettings = () => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
+const IconFile = () => <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>;
+const IconHome = () => <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
+const IconMenu = () => <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>;
+const IconDownload = () => <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
 
 export const Dashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics>({
@@ -19,6 +35,9 @@ export const Dashboard: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"today" | "week" | "month">("week");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [funnelSteps, setFunnelSteps] = useState<Array<{ name: string; value: number; drop?: string }>>([]);
+  const [hasRealFunnelData, setHasRealFunnelData] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -27,48 +46,46 @@ export const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // In production, this would fetch from Supabase
-      // For now, we'll use the in-memory data from services
-      
-      // Get leads (in-memory storage)
       const allLeads = await leadService.getLeadsByTenant("00000000-0000-0000-0000-000000000000");
       setLeads(allLeads);
 
-      // Calculate metrics based on time range
       const now = new Date();
       let startDate: Date;
-
       switch (timeRange) {
-        case "today":
-          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          break;
-        case "week":
-          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case "month":
-          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-          break;
+        case "today": startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+        case "week": startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
+        case "month": startDate = new Date(now.getFullYear(), now.getMonth(), 1); break;
       }
 
-      // Filter leads by time range
-      const filteredLeads = allLeads.filter(lead => {
-        const leadDate = new Date(lead.created_at);
-        return leadDate >= startDate;
-      });
+      const filteredLeads = allLeads.filter(lead => new Date(lead.created_at) >= startDate);
+      const scoreSplit: Record<LeadScore, number> = { low: 0, medium: 0, high: 0 };
+      filteredLeads.forEach(lead => { scoreSplit[lead.score]++; });
 
-      // Calculate score split
-      const scoreSplit: Record<LeadScore, number> = {
-        low: 0,
-        medium: 0,
-        high: 0
-      };
-
-      filteredLeads.forEach(lead => {
-        scoreSplit[lead.score]++;
-      });
-
-      // Get Calendly metrics
       const calendlyMetrics = calendlyService.getMetrics();
+
+      // Try real funnel data first, fall back to estimated multipliers
+      const funnelResult = leadService.getFunnelMetrics("00000000-0000-0000-0000-000000000000");
+      let realFunnelSteps: Array<{ name: string; value: number; drop?: string }> = [];
+      let hasReal = false;
+
+      if (funnelResult && funnelResult.hasRealData && funnelResult.funnelSteps.length > 1) {
+        realFunnelSteps = funnelResult.funnelSteps;
+        hasReal = true;
+      } else {
+        // Dev fallback: estimated pipeline based on lead count
+        const total = filteredLeads.length || 0;
+        realFunnelSteps = [
+          { value: total, name: "Landed" },
+          { value: Math.round(total * 0.65), name: "Engaged", drop: total > 0 ? "-35% est." : undefined },
+          { value: Math.round(total * 0.375), name: "Qualified", drop: total > 0 ? "-42% est." : undefined },
+          { value: Math.round(total * 0.29), name: "Calendly Shown" },
+          { value: Math.round(total * 0.19), name: "Clicked", drop: total > 0 ? "-36% est." : undefined },
+          { value: calendlyMetrics.booked, name: "Booked", drop: total > 0 ? "-44% est." : undefined },
+        ];
+      }
+
+      setFunnelSteps(realFunnelSteps);
+      setHasRealFunnelData(hasReal);
 
       setMetrics({
         leads_today: timeRange === "today" ? filteredLeads.length : 0,
@@ -82,258 +99,308 @@ export const Dashboard: React.FC = () => {
         recent_conversations: []
       });
     } catch (error) {
-      console.error("Failed to load dashboard data:", error);
+      logger.error("Failed to load dashboard data", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const getScoreColor = (score: LeadScore): string => {
-    switch (score) {
-      case "high":
-        return "#22c55e"; // Green
-      case "medium":
-        return "#f59e0b"; // Amber
-      case "low":
-        return "#ef4444"; // Red
-      default:
-        return "#6b7280"; // Gray
-    }
-  };
-
   const getRouteLabel = (route: string): string => {
     switch (route) {
-      case "calendly":
-        return "Calendly";
-      case "soft_booking":
-        return "Soft Booking";
-      case "nurture":
-        return "Nurture";
-      case "helpful_guidance":
-        return "Guidance";
-      default:
-        return route;
+      case "calendly": return "Calendly";
+      case "soft_booking": return "Soft Booking";
+      case "nurture": return "Nurture";
+      case "helpful_guidance": return "Guidance";
+      default: return route;
     }
   };
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
-    return date.toLocaleString();
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins} min ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours} hr ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
   };
 
+  const totalLeads = timeRange === "today" ? metrics.leads_today : timeRange === "week" ? metrics.leads_week : metrics.leads_month;
+
   return (
-    <div className="tq-dashboard">
-      <header className="tq-dashboard-header">
-        <h1>Funnel Dashboard</h1>
-        <div className="tq-dashboard-time-range">
-          <button 
-            className={timeRange === "today" ? "active" : ""} 
-            onClick={() => setTimeRange("today")}
-          >
-            Today
-          </button>
-          <button 
-            className={timeRange === "week" ? "active" : ""} 
-            onClick={() => setTimeRange("week")}
-          >
-            Last 7 Days
-          </button>
-          <button 
-            className={timeRange === "month" ? "active" : ""} 
-            onClick={() => setTimeRange("month")}
-          >
-            Last 30 Days
-          </button>
+    <div className="tq-dashboard-app">
+      {/* Mobile sidebar toggle */}
+      <button
+        className="tq-sidebar-toggle"
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        aria-label="Toggle sidebar"
+      >
+        <IconMenu />
+      </button>
+
+      {/* Sidebar */}
+      <aside className={`tq-sidebar${sidebarOpen ? " open" : ""}`} role="navigation" aria-label="Dashboard navigation">
+        <div className="tq-sidebar-brand">
+          <div className="tq-sidebar-mark">TQ</div>
+          <div className="tq-sidebar-brand-text">
+            <div className="tq-sidebar-brand-name">Tech Quarters</div>
+            <div className="tq-sidebar-brand-sub">Funnel ChatBot</div>
+          </div>
         </div>
-      </header>
+        <nav className="tq-sidebar-nav">
+          <div className="tq-sidebar-section-label">Overview</div>
+          <Link to="/dashboard" className="tq-sidebar-link tq-sidebar-link-active">
+            <IconGrid /> Dashboard
+          </Link>
+          <a href="#" className="tq-sidebar-link">
+            <IconChatSidebar /> Conversations
+          </a>
+          <a href="#" className="tq-sidebar-link">
+            <IconUsers /> Leads
+          </a>
 
-      {loading ? (
-        <div className="tq-dashboard-loading">
-          <div className="tq-spinner"></div>
-          <p>Loading dashboard data...</p>
+          <div className="tq-sidebar-section-label" style={{ marginTop: "var(--tq-sp-4)" }}>Analytics</div>
+          <a href="#" className="tq-sidebar-link">
+            <IconActivity /> Funnel Steps
+          </a>
+          <a href="#" className="tq-sidebar-link">
+            <IconBarChart /> Score Analysis
+          </a>
+          <a href="#" className="tq-sidebar-link">
+            <IconCalendar /> Booking Calendar
+          </a>
+
+          <div className="tq-sidebar-section-label" style={{ marginTop: "var(--tq-sp-4)" }}>System</div>
+          <a href="#" className="tq-sidebar-link">
+            <IconSettings /> Configuration
+          </a>
+          <a href="#" className="tq-sidebar-link">
+            <IconFile /> Decision Log
+          </a>
+          <Link to="/" className="tq-sidebar-link">
+            <IconHome /> Landing Page
+          </Link>
+        </nav>
+        <div className="tq-sidebar-footer">
+          <div className="tq-sidebar-status">
+            <span className="tq-sidebar-status-dot" />
+            Supabase connected
+          </div>
         </div>
-      ) : (
-        <>
-          {/* Metrics Overview */}
-          <section className="tq-dashboard-metrics">
-            <div className="tq-metric-card">
-              <h3>Total Leads</h3>
-              <div className="tq-metric-value">
-                {timeRange === "today" ? metrics.leads_today : 
-                 timeRange === "week" ? metrics.leads_week : metrics.leads_month}
-              </div>
-              <p className="tq-metric-label">
-                {timeRange === "today" ? "Today" : 
-                 timeRange === "week" ? "Last 7 Days" : "Last 30 Days"}
-              </p>
-            </div>
+      </aside>
 
-            <div className="tq-metric-card">
-              <h3>Qualified</h3>
-              <div className="tq-metric-value" style={{ color: getScoreColor("high") }}>
-                {metrics.score_split.high}
-              </div>
-              <p className="tq-metric-label">Routed to Calendly</p>
-            </div>
-
-            <div className="tq-metric-card">
-              <h3>Nurture</h3>
-              <div className="tq-metric-value" style={{ color: getScoreColor("medium") }}>
-                {metrics.score_split.medium}
-              </div>
-              <p className="tq-metric-label">In follow-up sequence</p>
-            </div>
-
-            <div className="tq-metric-card">
-              <h3>Low Priority</h3>
-              <div className="tq-metric-value" style={{ color: getScoreColor("low") }}>
-                {metrics.score_split.low}
-              </div>
-              <p className="tq-metric-label">Received guidance</p>
-            </div>
-          </section>
-
-          {/* Calendly Metrics */}
-          <section className="tq-dashboard-section">
-            <h2>Calendly Funnel</h2>
-            <div className="tq-calendly-metrics">
-              <div className="tq-calendly-metric">
-                <h4>Calendly Shown</h4>
-                <p>{metrics.calendly_shown}</p>
-              </div>
-              <div className="tq-calendly-metric">
-                <h4>Calendly Clicked</h4>
-                <p>{metrics.calendly_clicked}</p>
-              </div>
-              <div className="tq-calendly-metric">
-                <h4>Booked</h4>
-                <p>{metrics.calendly_booked}</p>
-              </div>
-              <div className="tq-calendly-metric">
-                <h4>Conversion Rate</h4>
-                <p>{metrics.calendly_shown > 0 ? 
-                  `${Math.round((metrics.calendly_booked / metrics.calendly_shown) * 100)}%` : "0%"}</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Score Distribution Chart */}
-          <section className="tq-dashboard-section">
-            <h2>Score Distribution</h2>
-            <div className="tq-score-chart">
-              {Object.entries(metrics.score_split).map(([score, count]) => (
-                <div key={score} className="tq-score-bar">
-                  <div className="tq-score-label">
-                    <span 
-                      className="tq-score-dot" 
-                      style={{ backgroundColor: getScoreColor(score as LeadScore) }}
-                    />
-                    {score.charAt(0).toUpperCase() + score.slice(1)}
-                  </div>
-                  <div className="tq-score-bar-container">
-                    <div 
-                      className="tq-score-bar-fill"
-                      style={{
-                        width: `${count > 0 ? (count / Math.max(...Object.values(metrics.score_split)) * 100) : 0}%`,
-                        backgroundColor: getScoreColor(score as LeadScore)
-                      }}
-                    />
-                  </div>
-                  <div className="tq-score-count">{count}</div>
-                </div>
+      {/* Main content */}
+      <main className="tq-dashboard-main" role="main" aria-label="Dashboard content">
+        <div className="tq-topbar">
+          <div>
+            <div className="tq-topbar-title">Funnel Dashboard</div>
+            <div className="tq-topbar-subtitle">Where is the funnel leaking? Lead qualification, routing, and booking visibility.</div>
+          </div>
+          <div className="tq-topbar-actions">
+            <div className="tq-topbar-tabs">
+              {(["today", "week", "month"] as const).map((range) => (
+                <button
+                  key={range}
+                  className={`tq-topbar-tab${timeRange === range ? " tq-topbar-tab-active" : ""}`}
+                  onClick={() => setTimeRange(range)}
+                >
+                  {range === "today" ? "Today" : range === "week" ? "This Week" : "This Month"}
+                </button>
               ))}
             </div>
-          </section>
+            <button className="tq-btn tq-btn-primary tq-btn-sm">
+              <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconDownload /></svg>
+              Export
+            </button>
+          </div>
+        </div>
 
-          {/* Recent Leads */}
-          <section className="tq-dashboard-section">
-            <h2>Recent Conversations</h2>
-            <div className="tq-leads-table-container">
-              {leads.length === 0 ? (
-                <p className="tq-no-data">No leads yet. Start chatting to see data here!</p>
-              ) : (
-                <table className="tq-leads-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Score</th>
-                      <th>Route</th>
-                      <th>Contact</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {leads.slice(0, 10).map((lead) => (
-                      <tr key={lead.id} className="tq-lead-row">
-                        <td>{formatDate(lead.created_at)}</td>
-                        <td>
-                          <span 
-                            className="tq-score-badge" 
-                            style={{ backgroundColor: getScoreColor(lead.score) }}
-                          >
-                            {lead.score.toUpperCase()}
-                          </span>
-                        </td>
-                        <td>{getRouteLabel(lead.route)}</td>
-                        <td>
-                          {lead.contact_info.name || "Anonymous"} <br />
-                          {lead.contact_info.email ? <small>{lead.contact_info.email}</small> : "No email"}
-                        </td>
-                        <td>
-                          <span className={`tq-status-badge tq-status-${lead.status}`}>
-                            {lead.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+        <div className="tq-dashboard-content">
+          {loading ? (
+            <div className="tq-dashboard-loading">
+              <div className="tq-spinner" />
+              <p>Loading dashboard data...</p>
             </div>
-          </section>
-
-          {/* Scoring Insights with Summary */}
-          <section className="tq-dashboard-section">
-            <h2>Scoring Insights</h2>
-            <div className="tq-scoring-insights">
-              {leads
-                .filter(lead => lead.scoring_result?.score_reason)
-                .slice(0, 5)
-                .map((lead) => (
-                  <div key={lead.id} className="tq-scoring-insight">
-                    <div className="tq-scoring-insight-header">
-                      <span
-                        className="tq-score-badge"
-                        style={{ backgroundColor: getScoreColor(lead.score) }}
-                      >
-                        {lead.score.toUpperCase()}
-                      </span>
-                      <span className="tq-scoring-insight-route">
-                        → {getRouteLabel(lead.route)}
-                      </span>
-                      {lead.scoring_result?.score_value !== undefined && (
-                        <span className="tq-score-numeric">
-                          {lead.scoring_result.score_value}/100
-                        </span>
-                      )}
-                    </div>
-                    <p className="tq-scoring-insight-reason">
-                      {lead.scoring_result?.score_reason}
-                    </p>
-                    {lead.scoring_result?.summary && (
-                      <div className="tq-scoring-summary">
-                        <span><strong>Business:</strong> {lead.scoring_result.summary.business_type}</span>
-                        <span><strong>Pain:</strong> {lead.scoring_result.summary.pain_point}</span>
-                        <span><strong>Urgency:</strong> {lead.scoring_result.summary.urgency}</span>
-                        <span><strong>Next:</strong> {lead.scoring_result.summary.next_action}</span>
-                      </div>
-                    )}
+          ) : (
+            <>
+              {/* KPI Cards */}
+              <div className="tq-dashboard-kpi-grid">
+                <div className="tq-dashboard-kpi-card">
+                  <div className="tq-dashboard-kpi-header">
+                    <span className="tq-dashboard-kpi-label">Leads Today</span>
+                    <div className="tq-dashboard-kpi-icon tq-dashboard-kpi-icon-blue"><IconUsers /></div>
                   </div>
-                ))}
-            </div>
-          </section>
-        </>
-      )}
+                  <div className="tq-dashboard-kpi-value">{totalLeads}</div>
+                  <div className="tq-dashboard-kpi-change tq-kpi-up">
+                    {timeRange === "today" ? "Today" : timeRange === "week" ? "This Week" : "This Month"}
+                  </div>
+                </div>
+                <div className="tq-dashboard-kpi-card">
+                  <div className="tq-dashboard-kpi-header">
+                    <span className="tq-dashboard-kpi-label">Qualified</span>
+                    <div className="tq-dashboard-kpi-icon tq-dashboard-kpi-icon-green">
+                      <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    </div>
+                  </div>
+                  <div className="tq-dashboard-kpi-value">{metrics.score_split.high}</div>
+                  <div className="tq-dashboard-kpi-change tq-kpi-up">
+                    {totalLeads > 0 ? `${Math.round((metrics.score_split.high / totalLeads) * 100)}% rate` : "0% rate"}
+                  </div>
+                </div>
+                <div className="tq-dashboard-kpi-card">
+                  <div className="tq-dashboard-kpi-header">
+                    <span className="tq-dashboard-kpi-label">Nurture</span>
+                    <div className="tq-dashboard-kpi-icon tq-dashboard-kpi-icon-amber"><IconActivity /></div>
+                  </div>
+                  <div className="tq-dashboard-kpi-value">{metrics.score_split.medium}</div>
+                  <div className="tq-dashboard-kpi-change" style={{ color: "var(--tq-warning)" }}>
+                    {totalLeads > 0 ? `${Math.round((metrics.score_split.medium / totalLeads) * 100)}% of total` : "0%"}
+                  </div>
+                </div>
+                <div className="tq-dashboard-kpi-card">
+                  <div className="tq-dashboard-kpi-header">
+                    <span className="tq-dashboard-kpi-label">Booked</span>
+                    <div className="tq-dashboard-kpi-icon tq-dashboard-kpi-icon-green"><IconCalendar /></div>
+                  </div>
+                  <div className="tq-dashboard-kpi-value">{metrics.calendly_booked}</div>
+                  <div className="tq-dashboard-kpi-change tq-kpi-up">
+                    {metrics.calendly_shown > 0 ? `${Math.round((metrics.calendly_booked / metrics.calendly_shown) * 100)}% of shown` : "0%"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Score Distribution */}
+              <div className="tq-dashboard-card">
+                <div className="tq-dashboard-card-header">
+                  <div>
+                    <div className="tq-dashboard-card-title">Score Distribution</div>
+                    <div className="tq-dashboard-card-subtitle">Lead intent scoring breakdown</div>
+                  </div>
+                </div>
+                <div className="tq-dashboard-card-body">
+                  <div className="tq-dashboard-score-split">
+                    {([
+                      { key: "high" as LeadScore, label: "High — Qualified", dot: "high" },
+                      { key: "medium" as LeadScore, label: "Medium — Nurture", dot: "medium" },
+                      { key: "low" as LeadScore, label: "Low — Low Priority", dot: "low" },
+                    ]).map((item) => (
+                      <div key={item.key} className="tq-dashboard-score-split-item">
+                        <span className={`tq-dashboard-score-dot tq-dashboard-score-dot-${item.dot}`} />
+                        <span className="tq-dashboard-score-split-label">{item.label}</span>
+                        <span className="tq-dashboard-score-split-value">{metrics.score_split[item.key]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Funnel Steps */}
+              <div className="tq-dashboard-card">
+                <div className="tq-dashboard-card-header">
+                  <div>
+                    <div className="tq-dashboard-card-title">Funnel Steps</div>
+                    <div className="tq-dashboard-card-subtitle">
+                      {hasRealFunnelData ? "Real event-based funnel data" : "Where is the funnel leaking? (estimated)"}
+                    </div>
+                  </div>
+                  <button className="tq-btn tq-btn-ghost tq-btn-sm">View Details →</button>
+                </div>
+                <div className="tq-dashboard-card-body">
+                  {!hasRealFunnelData && (
+                    <div style={{ marginBottom: "var(--tq-sp-3)", fontSize: "var(--tq-text-xs)", color: "var(--tq-warning)", background: "var(--tq-warning-bg)", padding: "4px 10px", borderRadius: "var(--tq-radius-pill)", display: "inline-block", fontWeight: 600 }}>
+                      Dev / Mock Data
+                    </div>
+                  )}
+                  <div className="tq-dashboard-funnel-grid">
+                    {funnelSteps.map((step) => (
+                      <div key={step.name} className="tq-dashboard-funnel-step">
+                        <div className="tq-dashboard-funnel-value">{step.value}</div>
+                        <div className="tq-dashboard-funnel-name">{step.name}</div>
+                        <div className="tq-dashboard-funnel-bar" style={{ width: `${Math.min(100, totalLeads > 0 ? (step.value / totalLeads) * 100 : 0)}%` }} />
+                        {step.drop && <div className="tq-dashboard-funnel-drop">{step.drop}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Conversations */}
+              <div className="tq-dashboard-card">
+                <div className="tq-dashboard-card-header">
+                  <div>
+                    <div className="tq-dashboard-card-title">Recent Conversations</div>
+                    <div className="tq-dashboard-card-subtitle">Latest lead qualification activity</div>
+                  </div>
+                  <div style={{ display: "flex", gap: "var(--tq-sp-2)" }}>
+                    <button className="tq-btn tq-btn-ghost tq-btn-sm">Filter</button>
+                    <button className="tq-btn tq-btn-ghost tq-btn-sm">Export CSV</button>
+                  </div>
+                </div>
+                <div className="tq-dashboard-table">
+                  {leads.length === 0 ? (
+                    <p className="tq-no-data">No leads yet. Start chatting to see data here!</p>
+                  ) : (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Lead</th>
+                          <th>Business</th>
+                          <th>Score</th>
+                          <th>Route</th>
+                          <th>Score Reason</th>
+                          <th>Booking</th>
+                          <th>Last Activity</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {leads.slice(0, 10).map((lead) => (
+                          <tr key={lead.id}>
+                            <td><span className="tq-lead-name">{lead.contact_info.name || "Anonymous"}</span></td>
+                            <td><span className="tq-lead-business">{lead.contact_info.company || "—"}</span></td>
+                            <td>
+                              <span className={`tq-score-badge-sm tq-score-badge-${lead.score}`}>
+                                {lead.score.charAt(0).toUpperCase() + lead.score.slice(1)}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className="tq-route-badge-sm"
+                                style={lead.score === "medium" ? { background: "var(--tq-warning-bg)", color: "var(--tq-warning)" } : lead.score === "low" ? { background: "var(--tq-danger-bg)", color: "var(--tq-danger)" } : undefined}
+                              >
+                                {getRouteLabel(lead.route)}
+                              </span>
+                            </td>
+                            <td className="tq-reason-cell">{lead.scoring_result?.score_reason || "—"}</td>
+                            <td>
+                              <span className={`tq-booking-badge tq-booking-${lead.status === "booked" ? "yes" : lead.status === "contacted" ? "pending" : "no"}`}>
+                                {lead.status === "booked" ? "Booked" : lead.status === "contacted" ? "Pending" : "—"}
+                              </span>
+                            </td>
+                            <td className="tq-time-cell">{formatDate(lead.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                {leads.length > 10 && (
+                  <div className="tq-pagination">
+                    <span className="tq-pagination-info">Showing 1–{Math.min(10, leads.length)} of {leads.length} leads</span>
+                    <div className="tq-pagination-buttons">
+                      <button className="tq-pagination-btn tq-pagination-btn-active">1</button>
+                      {leads.length > 10 && <button className="tq-pagination-btn">2</button>}
+                      {leads.length > 20 && <button className="tq-pagination-btn">3</button>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </main>
     </div>
   );
 };

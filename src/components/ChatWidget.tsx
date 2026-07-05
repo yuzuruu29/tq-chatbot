@@ -9,6 +9,7 @@ import { chatRateLimiter } from "../lib/rateLimit";
 import { getTenantConfig, type TenantConfig } from "../config/tenant";
 import { edgeProcessMessage } from "../lib/edgeClient";
 import { v4 as uuidv4 } from "uuid";
+import { logger } from "../lib/logger";
 
 // Persistence key for sessionStorage — scoped to visitor + tenant so
 // multiple tabs or tenants do not collide.
@@ -245,10 +246,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       content: userMessage.content,
       role: userMessage.role
     }).catch(() => {
-      // Message persistence failed (Edge Function down, network error).
-      // The message is already optimistically displayed to the user.
-      // Log but do not block the conversation flow.
-      console.warn("Failed to persist user message — conversation continues in-memory.");
+      logger.warn("Failed to persist user message — conversation continues in-memory.");
     });
 
     setState(prev => ({
@@ -385,7 +383,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
       content: assistantMessage.content,
       role: assistantMessage.role
     }).catch(() => {
-      console.warn("Failed to persist assistant message — conversation continues in-memory.");
+      logger.warn("Failed to persist assistant message — conversation continues in-memory.");
     });
 
     // IMPORTANT: the user message was already appended optimistically above.
@@ -672,14 +670,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
 
   return (
     <div className="tq-chatbot-widget">
+      {/* Header (dark) */}
       <div className="tq-chatbot-header">
         <div className="tq-chatbot-header-left">
-          <div className="tq-chatbot-header-avatar">
-            <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          </div>
+          <div className="tq-chatbot-header-avatar">TQ</div>
           <div className="tq-chatbot-header-info">
             <h3>{config.botTitle}</h3>
-            <p>{config.botSubtitle}</p>
+            <p>
+              {config.botSubtitle}
+              <span className="tq-chatbot-header-badge">Demo mode</span>
+            </p>
           </div>
         </div>
         <button className="tq-chatbot-close" onClick={onClose} aria-label="Close chat">
@@ -687,105 +687,116 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
         </button>
       </div>
 
-      <div className="tq-chatbot-messages">
+      {/* Messages */}
+      <div className="tq-chatbot-messages" role="log" aria-live="polite" aria-label="Chat messages">
         {state.messages.map((message) => (
           <div
             key={message.id}
             className={`tq-chatbot-message tq-chatbot-message-${message.role}`}
           >
-            <div className="tq-chatbot-message-content">
-              {message.content}
+            <div className={`tq-msg-avatar ${message.role === "user" ? "tq-msg-avatar-user" : "tq-msg-avatar-bot"}`}>
+              {message.role === "user" ? "Y" : "TQ"}
             </div>
-            <div className="tq-chatbot-message-meta">
-              {message.role === "user" ? "You" : config.botName} - {" "}
-              {new Date(message.timestamp).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit"
-              })}
+            <div>
+              <div className="tq-chatbot-message-content">
+                {message.content}
+              </div>
+              <div className="tq-chatbot-message-meta">
+                {new Date(message.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })}
+              </div>
             </div>
           </div>
         ))}
-        
+
+        {/* Typing indicator */}
         {state.isLoading && (
-          <div className="tq-chatbot-message tq-chatbot-message-assistant">
-            <div className="tq-chatbot-message-content">
-              <span className="tq-chatbot-typing">
-                Thinking
-                <span className="tq-typing-dots">
-                  <span /><span /><span />
-                </span>
-              </span>
+          <div className="tq-chatbot-typing">
+            <div className="tq-msg-avatar tq-msg-avatar-bot">TQ</div>
+            <div className="tq-typing-dots">
+              <span /><span /><span />
             </div>
           </div>
         )}
-        
+
+        {/* Contact form */}
         {state.showContactForm && (
           <div className="tq-chatbot-message tq-chatbot-message-assistant">
-            <div className="tq-chatbot-message-content">
-              <form onSubmit={handleContactSubmit} className="tq-chatbot-contact-form">
-                <h4>Let's connect</h4>
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Your name"
-                  value={state.contactInfo.name || ""}
-                  onChange={handleInputChange}
-                  required
-                />
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Your email"
-                  value={state.contactInfo.email || ""}
-                  onChange={handleInputChange}
-                  required
-                />
-                <input
-                  type="text"
-                  name="company"
-                  placeholder="Company (optional)"
-                  value={state.contactInfo.company || ""}
-                  onChange={handleInputChange}
-                />
-                <button type="submit" disabled={state.isLoading}>
-                  {state.isLoading ? "Submitting..." : "Submit"}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-        
-        {state.showCalendly && (
-          <div className="tq-chatbot-message tq-chatbot-message-assistant">
-            <div className="tq-chatbot-message-content">
-              <div className="tq-chatbot-calendly">
-                <h4>Book a call</h4>
-                <p>You look like a fit for a quick call. Pick a time that works for you.</p>
-                <div
-                  dangerouslySetInnerHTML={{
-                    __html: calendlyService.getEmbedScript("calendly-inline-widget") || ""
-                  }}
-                />
-                <button onClick={() => {
-                  calendlyService.recordClick(state.context?.visitor_id || "");
-                  setState(prev => ({
-                    ...prev,
-                    showCalendly: false,
-                    currentStep: "completed"
-                  }));
-                }} className="tq-chatbot-calendly-close">
-                  Close
-                </button>
+            <div className="tq-msg-avatar tq-msg-avatar-bot">TQ</div>
+            <div>
+              <div className="tq-chatbot-message-content">
+                <form onSubmit={handleContactSubmit} className="tq-chatbot-contact-form">
+                  <h4>{"Let's connect"}</h4>
+                  <input
+                    type="text"
+                    name="name"
+                    placeholder="Your name"
+                    value={state.contactInfo.name || ""}
+                    onChange={handleInputChange}
+                    required
+                  />
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="Your email"
+                    value={state.contactInfo.email || ""}
+                    onChange={handleInputChange}
+                    required
+                  />
+                  <input
+                    type="text"
+                    name="company"
+                    placeholder="Company (optional)"
+                    value={state.contactInfo.company || ""}
+                    onChange={handleInputChange}
+                  />
+                  <button type="submit" disabled={state.isLoading}>
+                    {state.isLoading ? "Submitting..." : "Submit"}
+                  </button>
+                </form>
               </div>
             </div>
           </div>
         )}
-        
+
+        {/* Calendly embed */}
+        {state.showCalendly && (
+          <div className="tq-chatbot-message tq-chatbot-message-assistant">
+            <div className="tq-msg-avatar tq-msg-avatar-bot">TQ</div>
+            <div>
+              <div className="tq-chatbot-message-content">
+                <div className="tq-chatbot-calendly">
+                  <h4>Book a call</h4>
+                  <p>You look like a fit for a quick call. Pick a time that works for you.</p>
+                  <div
+                    dangerouslySetInnerHTML={{
+                      __html: calendlyService.getEmbedScript("calendly-inline-widget") || ""
+                    }}
+                  />
+                  <button onClick={() => {
+                    calendlyService.recordClick(state.context?.visitor_id || "");
+                    setState(prev => ({
+                      ...prev,
+                      showCalendly: false,
+                      currentStep: "completed"
+                    }));
+                  }} className="tq-chatbot-calendly-close">
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Input */}
       {state.currentStep !== "completed" && !state.showCalendly && !state.showContactForm && (
-        <form className="tq-chatbot-input" onSubmit={handleSendSubmit}>
+        <form className="tq-chatbot-input" onSubmit={handleSendSubmit} aria-label="Send a message">
           <input
             ref={inputRef}
             type="text"
@@ -794,13 +805,20 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantId, onLeadCreated,
             onChange={handleChatInputChange}
             disabled={state.isLoading}
             aria-label="Message"
+            autoComplete="off"
           />
-          <button type="submit" disabled={state.isLoading || inputValue.trim().length === 0}>
-            Send
+          <button type="submit" disabled={state.isLoading || inputValue.trim().length === 0} aria-label="Send message">
+            <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </form>
       )}
 
+      {/* Footer */}
+      <div className="tq-chatbot-footer">
+        Powered by TQ Funnel ChatBot · Deterministic scoring · Reusable by config
+      </div>
+
+      {/* Completed state */}
       {state.currentStep === "completed" && (
         <div className="tq-chatbot-completed">
           <p>Thanks for the conversation. We will be in touch with your next step.</p>

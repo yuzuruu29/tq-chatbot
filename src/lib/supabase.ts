@@ -3,6 +3,7 @@
 // Service-role key is NEVER exposed to the client — it lives in Edge Functions.
 
 import { createClient } from "@supabase/supabase-js";
+import { logger } from "./logger";
 
 // Client-safe environment variables (VITE_ prefix = browser-exposed)
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://your-project-ref.supabase.co";
@@ -259,7 +260,7 @@ export class SupabaseService {
   public async initialize(): Promise<boolean> {
     // Check if Supabase is properly configured
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.warn("Supabase not configured. Using in-memory storage for development.");
+      logger.warn("Supabase not configured. Using in-memory storage for development.");
       this.initialized = false;
       return false;
     }
@@ -268,14 +269,14 @@ export class SupabaseService {
       // Test connection
       const { error } = await supabase.from("tenants").select("*").limit(1);
       if (error) {
-        console.warn("Supabase connection error:", error.message);
+        logger.warn("Supabase connection error", { code: error.code, hint: error.hint });
         this.initialized = false;
         return false;
       }
       this.initialized = true;
       return true;
     } catch (err) {
-      console.warn("Supabase initialization error:", err);
+      logger.warn("Supabase initialization error", err);
       this.initialized = false;
       return false;
     }

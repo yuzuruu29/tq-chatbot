@@ -12,6 +12,7 @@ import { supabaseService } from "../lib/supabase";
 import { messageService } from "./messageService";
 import { shouldSuppressAlert } from "../lib/idempotency";
 import { edgeCreateLead, edgeRecordEvent } from "../lib/edgeClient";
+import { logger } from "../lib/logger";
 
 // In-memory lead storage for development
 class InMemoryLeadStorage {
@@ -257,11 +258,10 @@ export class LeadService {
       data: { score: lead.score, reason: lead.scoring_result.score_reason }
     });
 
-    console.log(`ALERT: High-value lead detected!`, {
+    logger.warn("High-value lead detected", {
       leadId: lead.id,
       score: lead.score,
       reason: lead.scoring_result.score_reason,
-      contact: lead.contact_info
     });
   }
 
@@ -294,7 +294,7 @@ export class LeadService {
         event_type: "nurture_shown",
         data: { email: lead.contact_info.email }
       });
-      console.log(`Nurture sequence started for: ${lead.contact_info.email}`);
+      logger.info("Nurture sequence started", { leadId: lead.id, hasEmail: !!lead.contact_info.email });
     }
   }
 
@@ -373,6 +373,63 @@ export class LeadService {
 
   public async getLeadsByTenant(tenantId: string): Promise<Lead[]> {
     return this.storage.getLeadsByTenant(tenantId);
+  }
+
+  /**
+   * Compute funnel metrics from in-memory event data.
+   * Returns null when there is no real data — callers should fall back to
+   * an explicit dev/mock placeholder.
+   */
+  public getFunnelMetrics(tenantId: string): {
+    totalLeads: number;
+    scoreSplit: Record<string, number>;
+    funnelSteps: Array<{ name: string; value: number; drop?: string }>;
+    hasRealData: boolean;
+  } | null {
+    const leads = Array.from(this.storage["leads"]?.values() ?? [])
+      .filter((l: Lead) => l.tenant_id === tenantId);
+    const events = (this.storage["events"] as FunnelEvent[] | undefined) ?? [];
+
+    if (leads.length === 0 && events.length === 0) return null;
+
+    const scoreSplit: Record<string, number> = { high: 0, medium: 0, low: 0 };
+    for (const lead of leads) {
+      scoreSplit[lead.score] = (scoreSplit[lead.score] || 0) + 1;
+    }
+
+    const uniqueSessions = new Set<string>();
+    const sessionsWithEvent = new Map<string, Set<string>>();
+    for (const ev of events) {
+      uniqueSessions.add(ev.session_id);
+      if (!sessionsWithEvent.has(ev.event_type)) {
+        sessionsWithEvent.set(ev.event_type, new Set());
+      }
+      sessionsWithEvent.get(ev.event_type)!.add(ev.session_id);
+    }
+
+    const landed = uniqueSessions.size || leads.length;
+    const engaged = sessionsWithEvent.get("message_sent")?.size ?? 0;
+    const qualified = sessionsWithEvent.get("lead_scored")?.size ?? 0;
+    const calendlyShownCount = sessionsWithEvent.get("calendly_shown")?.size ?? 0;
+    const calendlyClicked = sessionsWithEvent.get("calendly_clicked")?.size ?? 0;
+    const calendlyBooked = sessionsWithEvent.get("calendly_booked")?.size ?? 0;
+
+    const funnelSteps: Array<{ name: string; value: number; drop?: string }> = [];
+    funnelSteps.push({ name: "Landed", value: landed });
+    if (engaged > 0) funnelSteps.push({ name: "Engaged", value: engaged, drop: landed > 0 ? `${Math.round(((landed - engaged) / landed) * 100)}% drop` : undefined });
+    if (qualified > 0) funnelSteps.push({ name: "Qualified", value: qualified, drop: engaged > 0 ? `${Math.round(((engaged - qualified) / engaged) * 100)}% drop` : undefined });
+    if (calendlyShownCount > 0) funnelSteps.push({ name: "Calendly Shown", value: calendlyShownCount });
+    if (calendlyClicked > 0) funnelSteps.push({ name: "Clicked", value: calendlyClicked, drop: calendlyShownCount > 0 ? `${Math.round(((calendlyShownCount - calendlyClicked) / calendlyShownCount) * 100)}% drop` : undefined });
+    if (calendlyBooked > 0) funnelSteps.push({ name: "Booked", value: calendlyBooked, drop: calendlyClicked > 0 ? `${Math.round(((calendlyClicked - calendlyBooked) / calendlyClicked) * 100)}% drop` : undefined });
+
+    return {
+      totalLeads: leads.length,
+      scoreSplit,
+      funnelSteps: funnelSteps.length > 0 ? funnelSteps : [
+        { name: "Landed", value: landed },
+      ],
+      hasRealData: true,
+    };
   }
 
   /**

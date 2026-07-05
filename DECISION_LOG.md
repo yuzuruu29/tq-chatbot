@@ -870,5 +870,84 @@ Previous items remain, plus:
 
 ---
 
+## Production Hardening (2026-07-05)
+
+### 39. PII-Safe Logging
+**Decision**: Replace all production `console.log`/`warn`/`error` with a centralized safe logger.
+**Rationale**:
+- Browser source had 8 unfiltered console calls, some containing raw email, contact_info, and booking data
+- PII in browser console is indexed by error-tracking tools and visible in devtools
+- New `src/lib/logger.ts` provides: `logger.info()`, `logger.warn()`, `logger.error()`, `logger.debug()`
+- Production: `info` and `debug` are suppressed entirely; `warn` and `error` redact PII fields (email, phone, name, contact_info, content, api_key, authorization, token, secret) replacing them with `[REDACTED]`
+- Development: all levels pass through unfiltered for debugging
+
+**Files changed**:
+- `src/lib/logger.ts` — new safe logger module
+- `src/App.tsx` — `console.log` → `logger.debug`
+- `src/services/calendlyService.ts` — removed PII-logging of bookingData; → `logger.debug`/`logger.info`
+- `src/services/leadService.ts` — removed PII-logging of contact_info and email; → `logger.warn`/`logger.info`
+- `src/services/n8nService.ts` — removed payload logging; → `logger.debug`
+- `src/lib/supabase.ts` — `console.warn` → `logger.warn`
+- `src/lib/edgeClient.ts` — removed error body logging; → `logger.warn`
+- `supabase/functions/chat-api/groq.ts` — reduced raw Groq response logging from 200 chars to 50 chars, sanitized non-printable chars; removed error details from Groq failure logs
+- `supabase/functions/chat-api/index.ts` — `console.error` now logs `err.message` only, not the full error object
+
+**Edge Function Groq PII risk addressed**: The old `console.warn("Groq returned invalid JSON:", raw.slice(0, 200))` logged up to 200 characters of raw Groq output, which could contain PII from the conversation. Now reduced to 50 characters with non-printable stripping.
+
+**Status**: ✅ Implemented
+
+### 40. Real Dashboard Funnel Metrics
+**Decision**: Dashboard funnel steps now use real event data when available, with a clearly labeled dev/mock fallback.
+**Rationale**:
+- Old Dashboard used hardcoded multipliers (65%, 37.5%, 29%, 19%) for funnel steps regardless of actual data
+- New `leadService.getFunnelMetrics()` aggregates from in-memory events: counts unique sessions per event type (message_sent, lead_scored, calendly_shown, calendly_clicked, calendly_booked)
+- Returns null when there is no real data — Dashboard falls back to estimated multipliers but labels them "Dev / Mock Data"
+- When real data exists, the Dashboard subtitle shows "Real event-based funnel data" and no mock badge is shown
+- Score split (high/medium/low) is computed from actual lead counts
+
+**Dashboard state additions**: `funnelSteps` (computed array), `hasRealFunnelData` (boolean flag)
+
+**V1 tradeoff**: In-memory events reset on page refresh. Real persistence requires the Supabase Edge Function to be deployed. The mock fallback is clearly labeled.
+
+**Status**: ✅ Implemented
+
+### 41. Social Meta Tags
+**Decision**: Add Open Graph and Twitter Card metadata to `index.html`.
+**Rationale**:
+- No social preview metadata existed — shared links would show a blank or auto-generated preview
+- Added: `og:title`, `og:description`, `og:type`, `og:image` (reuses existing `favicon.svg`), `twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `theme-color`
+- No new dependencies or assets — reuses existing favicon
+- Title updated to "TQ Funnel Assistant — Lead Qualification Chatbot" for better SEO
+
+**V1 tradeoff**: `og:image` uses the SVG favicon. A dedicated 1200×630px OG image would provide better social preview quality but was not in scope.
+
+**Status**: ✅ Implemented
+
+---
+
+## Changelog (continued)
+
+| Date | Decision | Status |
+|------|----------|--------|
+| 2026-07-05 | PII-safe logging | ✅ Complete |
+| 2026-07-05 | Real dashboard funnel metrics | ✅ Complete |
+| 2026-07-05 | Social meta tags | ✅ Complete |
+
+---
+
+## Verification Results (2026-07-05 Hardening)
+
+| Check | Result |
+|-------|--------|
+| Build (`npm run build`) | ✅ PASS |
+| Lint (`npm run lint`) | ✅ PASS (3 pre-existing hook warnings) |
+| Tests (`npm test`) | ✅ PASS (112/112) |
+| No `console.log` with PII in source | ✅ VERIFIED |
+| No raw emails logged | ✅ VERIFIED |
+| No raw contact_info logged | ✅ VERIFIED |
+| No Groq raw response > 50 chars logged | ✅ VERIFIED |
+
+---
+
 *Last Updated: 2026-07-05*
-*Version: 5.0.0*
+*Version: 6.0.0*
