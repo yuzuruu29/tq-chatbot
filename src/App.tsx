@@ -155,7 +155,7 @@ const App: React.FC = () => {
     <Router>
       <div className="tq-app">
         <Navigation />
-        <main className="tq-main-content">
+        <main className="tq-main-content" id="main-content">
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/dashboard" element={<AuthGate><Dashboard /></AuthGate>} />

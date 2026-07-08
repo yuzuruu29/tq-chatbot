@@ -229,9 +229,23 @@ export const Dashboard: React.FC = () => {
 
         <div className="tq-dashboard-content">
           {loading ? (
-            <div className="tq-dashboard-loading">
-              <div className="tq-spinner" />
-              <p>Loading dashboard data...</p>
+            <div className="tq-dashboard-content">
+              <div className="tq-dashboard-kpi-grid">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="tq-dashboard-kpi-card">
+                    <div className="tq-skeleton tq-skeleton-text-short" style={{ marginBottom: 8 }} />
+                    <div className="tq-skeleton tq-skeleton-block" style={{ height: 32, width: "60%", marginTop: 8 }} />
+                  </div>
+                ))}
+              </div>
+              <div className="tq-dashboard-card">
+                <div className="tq-skeleton tq-skeleton-text" style={{ width: "50%", marginBottom: 16 }} />
+                <div className="tq-skeleton tq-skeleton-card" />
+              </div>
+              <div className="tq-dashboard-card">
+                <div className="tq-skeleton tq-skeleton-text" style={{ width: "50%", marginBottom: 16 }} />
+                <div className="tq-skeleton tq-skeleton-block" style={{ height: 200 }} />
+              </div>
             </div>
           ) : (
             <>
