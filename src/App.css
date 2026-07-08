@@ -2321,3 +2321,49 @@ button:disabled {
   .tq-hero-badge-dot { animation: none; }
   .tq-typing-dots span { animation: none; opacity: 0.6; }
 }
+
+/* ============================================
+   Lead-created Toast
+   ============================================ */
+.tq-lead-toast {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: var(--tq-sp-4);
+  padding: 12px 24px;
+  background: var(--tq-surface);
+  border: 1px solid var(--tq-border);
+  border-radius: var(--tq-radius);
+  box-shadow: var(--tq-shadow-lg);
+  font-size: var(--tq-text-sm);
+  color: var(--tq-text);
+  animation: tq-toast-in 300ms var(--tq-ease) forwards;
+}
+.tq-lead-toast-link {
+  font-weight: 600;
+  white-space: nowrap;
+}
+@keyframes tq-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ============================================
+   Disabled / coming-soon sidebar links
+   ============================================ */
+.tq-sidebar-link[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+.tq-footer-link-disabled {
+  opacity: 0.45;
+  cursor: default;
+  color: var(--tq-text-secondary);
+  font-size: inherit;
+}

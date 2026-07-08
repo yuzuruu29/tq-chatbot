@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import ChatWidget from "./ChatWidget";
 import type { Lead } from "../types";
 
@@ -83,9 +84,20 @@ function useScrollReveal() {
 // ─── Component ───────────────────────────────────────────────
 export const LandingPage: React.FC = () => {
   const [showChat, setShowChat] = useState(false);
+  const [leadToast, setLeadToast] = useState<Lead | null>(null);
   useScrollReveal();
 
-  const handleLeadCreated = (_lead: Lead) => {};
+  // Listen for external "open chat" requests dispatched from nav/footer.
+  useEffect(() => {
+    const handler = () => setShowChat(true);
+    document.addEventListener("tq:open-chat", handler);
+    return () => document.removeEventListener("tq:open-chat", handler);
+  }, []);
+
+  const handleLeadCreated = (lead: Lead) => {
+    setLeadToast(lead);
+    setTimeout(() => setLeadToast(null), 5000);
+  };
 
   // ─── Value cards data ──────────────────────────────────────
   const valueCards = [
@@ -179,10 +191,10 @@ export const LandingPage: React.FC = () => {
                 <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconChat /></svg>
                 Open Chat Demo
               </button>
-              <a href="/dashboard" className="tq-btn tq-btn-secondary">
+              <Link to="/dashboard" className="tq-btn tq-btn-secondary">
                 View Dashboard
                 <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconArrowRight /></svg>
-              </a>
+              </Link>
             </div>
             <div className="tq-proof-strip">
               <span className="tq-proof-item"><span className="tq-proof-dot" />Deterministic scoring</span>
@@ -477,10 +489,10 @@ export const LandingPage: React.FC = () => {
                 <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconChat /></svg>
                 Open Chat Demo
               </button>
-              <a href="/dashboard" className="tq-btn tq-btn-secondary tq-cta-btn-secondary">
+              <Link to="/dashboard" className="tq-btn tq-btn-secondary tq-cta-btn-secondary">
                 View Dashboard
                 <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconArrowRight /></svg>
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -505,6 +517,14 @@ export const LandingPage: React.FC = () => {
           <IconChat />
           Qualify a lead
         </button>
+      )}
+
+      {/* ═══ Lead-created toast ═══ */}
+      {leadToast && (
+        <div className="tq-lead-toast" role="status">
+          <span>Lead captured for {leadToast.contact_info?.name || "a visitor"}</span>
+          <Link to="/dashboard" className="tq-lead-toast-link">View in dashboard</Link>
+        </div>
       )}
     </div>
   );

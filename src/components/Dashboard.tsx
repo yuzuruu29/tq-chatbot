@@ -39,6 +39,36 @@ export const Dashboard: React.FC = () => {
   const [funnelSteps, setFunnelSteps] = useState<Array<{ name: string; value: number; drop?: string }>>([]);
   const [hasRealFunnelData, setHasRealFunnelData] = useState(false);
   const [connected] = useState<boolean>(supabaseService.isInitialized());
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+  const totalPages = Math.ceil(leads.length / PAGE_SIZE) || 1;
+
+  // Reset page when data changes so it never exceeds available pages.
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [leads.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const downloadCsv = () => {
+    if (leads.length === 0) return;
+    const headers = ["Name", "Email", "Company", "Score", "Route", "Status", "Created"];
+    const rows = leads.map((l) => [
+      l.contact_info?.name || "",
+      l.contact_info?.email || "",
+      l.contact_info?.company || "",
+      l.score,
+      l.route,
+      l.status,
+      l.created_at,
+    ]);
+    const csv = [headers, ...rows]
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tq-leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     loadDashboardData();
@@ -134,31 +164,31 @@ export const Dashboard: React.FC = () => {
           <Link to="/dashboard" className="tq-sidebar-link tq-sidebar-link-active">
             <IconGrid /> Dashboard
           </Link>
-          <a href="#" className="tq-sidebar-link">
+          <a href="#conversations-table" className="tq-sidebar-link">
             <IconChatSidebar /> Conversations
           </a>
-          <a href="#" className="tq-sidebar-link">
+          <a href="#leads-overview" className="tq-sidebar-link">
             <IconUsers /> Leads
           </a>
 
           <div className="tq-sidebar-section-label" style={{ marginTop: "var(--tq-sp-4)" }}>Analytics</div>
-          <a href="#" className="tq-sidebar-link">
+          <span className="tq-sidebar-link tq-sidebar-link-disabled" aria-disabled="true">
             <IconActivity /> Funnel Steps
-          </a>
-          <a href="#" className="tq-sidebar-link">
+          </span>
+          <span className="tq-sidebar-link tq-sidebar-link-disabled" aria-disabled="true">
             <IconBarChart /> Score Analysis
-          </a>
-          <a href="#" className="tq-sidebar-link">
+          </span>
+          <span className="tq-sidebar-link tq-sidebar-link-disabled" aria-disabled="true">
             <IconCalendar /> Booking Calendar
-          </a>
+          </span>
 
           <div className="tq-sidebar-section-label" style={{ marginTop: "var(--tq-sp-4)" }}>System</div>
-          <a href="#" className="tq-sidebar-link">
+          <span className="tq-sidebar-link tq-sidebar-link-disabled" aria-disabled="true">
             <IconSettings /> Configuration
-          </a>
-          <a href="#" className="tq-sidebar-link">
+          </span>
+          <span className="tq-sidebar-link tq-sidebar-link-disabled" aria-disabled="true">
             <IconFile /> Decision Log
-          </a>
+          </span>
           <Link to="/" className="tq-sidebar-link">
             <IconHome /> Landing Page
           </Link>
@@ -190,7 +220,7 @@ export const Dashboard: React.FC = () => {
                 </button>
               ))}
             </div>
-            <button className="tq-btn tq-btn-primary tq-btn-sm">
+            <button className="tq-btn tq-btn-primary tq-btn-sm" onClick={downloadCsv}>
               <svg className="tq-btn-icon" viewBox="0 0 24 24"><IconDownload /></svg>
               Export
             </button>
@@ -206,7 +236,7 @@ export const Dashboard: React.FC = () => {
           ) : (
             <>
               {/* KPI Cards */}
-              <div className="tq-dashboard-kpi-grid">
+              <div className="tq-dashboard-kpi-grid" id="leads-overview">
                 <div className="tq-dashboard-kpi-card">
                   <div className="tq-dashboard-kpi-header">
                     <span className="tq-dashboard-kpi-label">Leads Today</span>
@@ -307,15 +337,15 @@ export const Dashboard: React.FC = () => {
               </div>
 
               {/* Recent Conversations */}
-              <div className="tq-dashboard-card">
+              <div className="tq-dashboard-card" id="conversations-table">
                 <div className="tq-dashboard-card-header">
                   <div>
                     <div className="tq-dashboard-card-title">Recent Conversations</div>
                     <div className="tq-dashboard-card-subtitle">Latest lead qualification activity</div>
                   </div>
                   <div style={{ display: "flex", gap: "var(--tq-sp-2)" }}>
-                    <button className="tq-btn tq-btn-ghost tq-btn-sm">Filter</button>
-                    <button className="tq-btn tq-btn-ghost tq-btn-sm">Export CSV</button>
+                    <button className="tq-btn tq-btn-ghost tq-btn-sm" disabled>Filter</button>
+                    <button className="tq-btn tq-btn-ghost tq-btn-sm" onClick={downloadCsv}>Export CSV</button>
                   </div>
                 </div>
                 <div className="tq-dashboard-table">
@@ -335,7 +365,7 @@ export const Dashboard: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {leads.slice(0, 10).map((lead) => (
+                        {leads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((lead) => (
                           <tr key={lead.id}>
                             <td><span className="tq-lead-name">{lead.contact_info.name || "Anonymous"}</span></td>
                             <td><span className="tq-lead-business">{lead.contact_info.company || "—"}</span></td>
@@ -365,13 +395,21 @@ export const Dashboard: React.FC = () => {
                     </table>
                   )}
                 </div>
-                {leads.length > 10 && (
+                {leads.length > PAGE_SIZE && (
                   <div className="tq-pagination">
-                    <span className="tq-pagination-info">Showing 1–{Math.min(10, leads.length)} of {leads.length} leads</span>
+                    <span className="tq-pagination-info">
+                      Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, leads.length)} of {leads.length} leads
+                    </span>
                     <div className="tq-pagination-buttons">
-                      <button className="tq-pagination-btn tq-pagination-btn-active">1</button>
-                      {leads.length > 10 && <button className="tq-pagination-btn">2</button>}
-                      {leads.length > 20 && <button className="tq-pagination-btn">3</button>}
+                      {Array.from({ length: totalPages }, (_, i) => (
+                        <button
+                          key={i + 1}
+                          className={`tq-pagination-btn${page === i + 1 ? " tq-pagination-btn-active" : ""}`}
+                          onClick={() => setPage(i + 1)}
+                        >
+                          {i + 1}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}

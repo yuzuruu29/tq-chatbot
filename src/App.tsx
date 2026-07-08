@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from "react-router-dom";
 import LandingPage from "./components/LandingPage";
 import Dashboard from "./components/Dashboard";
 import AuthGate from "./components/AuthGate";
@@ -85,10 +85,7 @@ const Navigation: React.FC = () => {
           <Link to="/dashboard" className="tq-btn tq-btn-ghost tq-btn-sm">Dashboard</Link>
           <button
             className="tq-btn tq-btn-primary tq-btn-sm"
-            onClick={() => {
-              const chatToggle = document.querySelector(".tq-chatbot-toggle") as HTMLButtonElement;
-              chatToggle?.click();
-            }}
+            onClick={() => document.dispatchEvent(new CustomEvent("tq:open-chat"))}
           >
             Open Chat Demo
           </button>
@@ -131,16 +128,15 @@ const Footer: React.FC = () => {
               <Link to="/dashboard">Funnel Dashboard</Link>
               <a href="#" onClick={(e) => {
                 e.preventDefault();
-                const chatToggle = document.querySelector(".tq-chatbot-toggle") as HTMLButtonElement;
-                chatToggle?.click();
+                document.dispatchEvent(new CustomEvent("tq:open-chat"));
               }}>Chat Demo</a>
-              <a href="#">Decision Log</a>
+              <span aria-disabled="true" className="tq-footer-link-disabled">Decision Log</span>
             </div>
             <div className="tq-footer-col">
               <h5>Resources</h5>
-              <a href="#">System Structure</a>
-              <a href="#">Reconfiguration Guide</a>
-              <a href="#">Cost Breakdown</a>
+              <span aria-disabled="true" className="tq-footer-link-disabled">System Structure</span>
+              <span aria-disabled="true" className="tq-footer-link-disabled">Reconfiguration Guide</span>
+              <span aria-disabled="true" className="tq-footer-link-disabled">Cost Breakdown</span>
             </div>
           </div>
         </div>
@@ -163,6 +159,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/dashboard" element={<AuthGate><Dashboard /></AuthGate>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
         <Footer />
