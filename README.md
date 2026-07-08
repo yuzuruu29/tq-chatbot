@@ -23,9 +23,9 @@ A web-based funnel chatbot MVP that qualifies visitors, captures lead details, s
 - **Database**: Supabase (PostgreSQL)
 - **Styling**: CSS Modules with CSS Variables
 - **Testing**: Vitest
-- **LLM**: Claude API (optional, with fallback)
-- **Scheduling**: Calendly (optional, with stub)
-- **Automation**: n8n (optional, with stub)
+- **LLM**: Groq (optional, with deterministic fallback) via Supabase Edge Function
+- **Scheduling**: Calendly (optional, with safe embed stub)
+- **Automation**: n8n webhook contract (Edge Function-ready)
 
 ## 📁 Project Structure
 
@@ -33,18 +33,24 @@ A web-based funnel chatbot MVP that qualifies visitors, captures lead details, s
 tq-chatbot-task/
 ├── src/
 │   ├── components/           # React components
-│   │   ├── ChatWidget.tsx   # Embedded chat widget
-│   │   ├── LandingPage.tsx  # Main landing page
-│   │   └── Dashboard.tsx    # Analytics dashboard
+│   │   ├── ChatWidget.tsx   # Embedded chat widget (UI layer)
+│   │   ├── LandingPage.tsx  # Marketing landing page
+│   │   ├── Dashboard.tsx    # Analytics dashboard
+│   │   └── AuthGate.tsx     # Supabase Auth wrapper
+│   ├── hooks/               # Custom React hooks
+│   │   └── useChatEngine.ts # Conversation state machine + scoring logic
 │   ├── lib/                 # Core libraries
 │   │   ├── scoring.ts       # Deterministic scoring module
-│   │   └── supabase.ts      # Supabase client configuration
+│   │   ├── supabase.ts      # Supabase client + typed Database schema
+│   │   ├── edgeClient.ts    # Edge Function client (browser → Supabase)
+│   │   ├── idempotency.ts   # Duplicate/spam guards
+│   │   ├── rateLimit.ts     # Client-side rate limiter
+│   │   └── logger.ts        # PII-redacting logger
 │   ├── services/            # Business services
-│   │   ├── messageService.ts # Chat message persistence
-│   │   ├── leadService.ts    # Lead management
-│   │   ├── claudeService.ts  # LLM extraction service
-│   │   ├── calendlyService.ts # Calendly integration
-│   │   └── n8nService.ts     # n8n workflow automation
+│   │   ├── messageService.ts  # Chat message persistence
+│   │   ├── leadService.ts     # Lead management + funnel events
+│   │   ├── dashboardService.ts # Dashboard data aggregation (Supabase views + fallback)
+│   │   └── calendlyService.ts  # Calendly integration
 │   ├── types/               # TypeScript type definitions
 │   │   └── index.ts         # Core types
 │   ├── __tests__/           # Test files
@@ -126,10 +132,10 @@ npm run preview
 |----------|----------|-------------|
 | `VITE_SUPABASE_URL` | Yes | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
-| `VITE_CLAUDE_API_KEY` | No | Claude API key for LLM extraction |
 | `VITE_CALENDLY_URL` | No | Calendly embed URL |
-| `VITE_N8N_API_KEY` | No | n8n API key for workflow automation |
-| `VITE_N8N_BASE_URL` | No | n8n instance URL |
+| `VITE_DISABLE_AUTH` | No | Set `"true"` to bypass auth in local dev |
+| `GROQ_API_KEY` | No | Groq API key (server-only, Edge Function) |
+| `SUPABASE_SERVICE_ROLE_KEY` | No | Service-role key (server-only, Edge Function) |
 
 ### Supabase Setup
 
@@ -276,7 +282,7 @@ This section maps directly to Kaan's requested deliverables:
   - Future improvements (CRM, auto follow-up, multi-client setup)
 
 ### 6. Working Proof
-- **`npm run test`** — 15/15 acceptance tests pass (all 4 seed scenarios + edge cases)
+- **`npm run test`** — 116/116 tests pass (scoring, idempotency, edge client, dashboard, chat widget)
 - **`npm run build`** — TypeScript compiles, Vite builds successfully
 - **Deterministic scoring** — Fully working with auditable rules
 - **Chat widget** — Functional with conversation flow, contact capture, Calendly embed
@@ -315,8 +321,8 @@ This section maps directly to Kaan's requested deliverables:
 
 ### Production Security Model
 
-- **Claude API calls** → Supabase Edge Function `/api/extract-signals`
-- **n8n event dispatch** → Supabase Edge Function `/api/n8n-dispatch`
+- **Groq LLM calls** → Supabase Edge Function `chat-api` (signal extraction + response drafting)
+- **n8n event dispatch** → Edge Function-ready webhook contract (logs to console in dev)
 - **Service-role writes** → Supabase Edge Functions (alerts, followup_jobs, tenant admin)
 - **Browser** → Only uses anon key + RLS policies
 

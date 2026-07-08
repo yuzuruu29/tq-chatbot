@@ -333,6 +333,9 @@ export const LandingPage: React.FC = () => {
             <h2 className="tq-section-title" data-reveal>Where is the funnel leaking?</h2>
             <p className="tq-section-desc" data-reveal>
               Lead qualification, routing, and booking visibility — all in one operational view.
+              <span style={{ display: "block", marginTop: 4, fontSize: "var(--tq-text-xs)", color: "var(--tq-text-muted)" }}>
+                Showing sample data for illustration
+              </span>
             </p>
           </div>
           <div className="tq-dashboard-preview" data-reveal>

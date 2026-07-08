@@ -70,22 +70,20 @@ The chat logic that:
 
 ---
 
-### 4. Claude Extraction (Optional)
+### 4. Groq LLM Extraction (Optional)
 
-An LLM-based signal extraction layer that:
+An LLM-based signal extraction and response drafting layer powered by Groq:
 
-- Receives user message text
+- Receives user message text and conversation history
 - Extracts structured signals (has_business, urgency, problem_clarity, etc.)
-- Returns a JSON object with confidence scores
-- Falls back to deterministic regex when unavailable
+- Drafts natural-language responses (replaces deterministic wording when available)
+- Falls back to deterministic regex extraction when Groq is unconfigured or times out
 
-**What it does:** Improves signal extraction accuracy beyond simple pattern matching.
+**What it does:** Improves signal extraction accuracy and response naturalness beyond simple pattern matching. LLM results never override positive deterministic signals.
 
-**Security:** The Claude API key lives in a Supabase Edge Function, never in the browser. The browser calls the Edge Function endpoint.
+**Security:** The Groq API key lives in a Supabase Edge Function (`chat-api`), never in the browser.
 
-**Reusable across clients:** The extraction prompt is generic. Client-specific context can be added to the system prompt via tenant configuration.
-
-**Stubbed in MVP:** Uses deterministic regex extraction. Ready for Edge Function integration.
+**Reusable across clients:** The extraction prompt is generic. Client-specific context is passed via tenant configuration.
 
 ---
 
@@ -140,7 +138,7 @@ The workflow automation layer that:
 
 **Reusable across clients:** The event contract is generic. Each tenant can have different n8n workflows configured.
 
-**Stubbed in MVP:** Logs events to console. Ready for Edge Function integration.
+**Contract-ready:** The event types and payload shapes are defined. In development, events log to console. Production deployment wires the Edge Function to the n8n webhook URL.
 
 ---
 
