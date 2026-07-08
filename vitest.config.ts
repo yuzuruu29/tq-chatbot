@@ -12,7 +12,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: ['src/lib/**', 'src/services/**'],
-      exclude: ['src/**/*.d.ts', 'src/**/__tests__/**']
+      exclude: ['src/**/*.d.ts', 'src/**/__tests__/**'],
+      thresholds: {
+        lines: 60,
+        functions: 55,
+        branches: 55,
+      },
     }
   }
 });
