@@ -60,3 +60,8 @@ class ClientRateLimiter {
 
 // Default: 30 messages per 60 seconds per browser tab.
 export const chatRateLimiter = new ClientRateLimiter(60_000, 30);
+
+// Groq-specific rate limiter: tighter window to bound LLM API cost exposure.
+// 10 Groq calls per 60 seconds per browser tab.  When exceeded, the chatbot
+// falls back to deterministic response generation until the window resets.
+export const groqRateLimiter = new ClientRateLimiter(60_000, 10);

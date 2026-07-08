@@ -14,7 +14,7 @@ import {
 } from "../lib/scoring";
 import { calendlyService } from "../services/calendlyService";
 import { makeIdempotencyKey, idempotencyTracker, isSpamSubmission } from "../lib/idempotency";
-import { chatRateLimiter } from "../lib/rateLimit";
+import { chatRateLimiter, groqRateLimiter } from "../lib/rateLimit";
 import { getTenantConfig, type TenantConfig } from "../config/tenant";
 import { edgeProcessMessage } from "../lib/edgeClient";
 import { v4 as uuidv4 } from "uuid";
@@ -313,53 +313,68 @@ export function useChatEngine(tenantId: string, onLeadCreated?: (lead: Lead) => 
     const gap = getQualificationGap(updatedSignals);
     const nextQuestionPurpose: ChatState["lastQuestionPurpose"] = gap;
 
-    // Optional Groq enhancement (non-blocking).
+    // ── Groq as primary model provider ──────────────────────────────
+    // Call Groq via Edge Function for signal extraction + response drafting.
+    // This is the PRIMARY response path — Groq drafts the assistant message.
+    // Falls back to deterministic response when Groq is unavailable, times
+    // out, returns invalid data, or the per-tab rate limit is exceeded.
     const routeConfig = getRouteConfig(scoringResult.route);
-    edgeProcessMessage(
-      tenantId, content,
-      state.messages.map(m => ({ role: m.role, content: m.content })),
-      updatedSignals, prevPurpose,
-      config as unknown as Record<string, unknown>,
-      { next_gap: gap, final_score: scoringResult.final_score, route: scoringResult.route,
-        business_type_text: updatedSignals.business_type_text, problem_text: updatedSignals.problem_text,
-        next_action: routeConfig.description },
-    ).then(groqResult => {
-      if (!groqResult) return;
-      if (groqResult.extracted_signals) {
-        const groqSignals: Partial<typeof defaultSignals> = {};
-        const gs = groqResult.extracted_signals;
-        if (gs.has_business === true && !updatedSignals.has_business) groqSignals.has_business = true;
-        if (gs.business_type_text && !updatedSignals.business_type_text) groqSignals.business_type_text = gs.business_type_text;
-        if (gs.problem_clarity != null && gs.problem_clarity > 0 && (!updatedSignals.problem_clarity || updatedSignals.problem_clarity < 1))
-          groqSignals.problem_clarity = gs.problem_clarity;
-        if (gs.problem_text && !updatedSignals.problem_text) groqSignals.problem_text = gs.problem_text;
-        if (gs.urgency != null && gs.urgency > 0 && (!updatedSignals.urgency || updatedSignals.urgency < 1))
-          groqSignals.urgency = gs.urgency;
-        if (gs.wants_to_book === true && !updatedSignals.wants_to_book) groqSignals.wants_to_book = true;
-        if (gs.has_traffic_or_spend === true && !updatedSignals.has_traffic_or_spend) groqSignals.has_traffic_or_spend = true;
-        if (gs.email) groqSignals.contact_captured = true;
+    const groqCheck = groqRateLimiter.check();
 
-        if (Object.keys(groqSignals).length > 0) {
-          updatedSignals = mergeSignals(updatedSignals, groqSignals);
-          const enhancedScore = scoreLead(updatedSignals);
-          if (
-            (enhancedScore.final_score === "high" && scoringResult.final_score !== "high") ||
-            (enhancedScore.final_score === "medium" && scoringResult.final_score === "low")
-          ) {
-            assistantResponse = generateCloserResponse(content, updatedSignals, enhancedScore, config);
+    if (groqCheck.allowed) {
+      try {
+        const groqResult = await edgeProcessMessage(
+          tenantId, content,
+          state.messages.map(m => ({ role: m.role, content: m.content })),
+          updatedSignals, prevPurpose,
+          config as unknown as Record<string, unknown>,
+          { next_gap: gap, final_score: scoringResult.final_score, route: scoringResult.route,
+            business_type_text: updatedSignals.business_type_text, problem_text: updatedSignals.problem_text,
+            next_action: routeConfig.description },
+        );
+
+        if (groqResult) {
+          // Merge Groq-extracted signals (only upgrade, never overwrite positives).
+          if (groqResult.extracted_signals) {
+            const groqSignals: Partial<typeof defaultSignals> = {};
+            const gs = groqResult.extracted_signals;
+            if (gs.has_business === true && !updatedSignals.has_business) groqSignals.has_business = true;
+            if (gs.business_type_text && !updatedSignals.business_type_text) groqSignals.business_type_text = gs.business_type_text;
+            if (gs.problem_clarity != null && gs.problem_clarity > 0 && (!updatedSignals.problem_clarity || updatedSignals.problem_clarity < 1))
+              groqSignals.problem_clarity = gs.problem_clarity;
+            if (gs.problem_text && !updatedSignals.problem_text) groqSignals.problem_text = gs.problem_text;
+            if (gs.urgency != null && gs.urgency > 0 && (!updatedSignals.urgency || updatedSignals.urgency < 1))
+              groqSignals.urgency = gs.urgency;
+            if (gs.wants_to_book === true && !updatedSignals.wants_to_book) groqSignals.wants_to_book = true;
+            if (gs.has_traffic_or_spend === true && !updatedSignals.has_traffic_or_spend) groqSignals.has_traffic_or_spend = true;
+            if (gs.email) groqSignals.contact_captured = true;
+
+            if (Object.keys(groqSignals).length > 0) {
+              updatedSignals = mergeSignals(updatedSignals, groqSignals);
+              const enhancedScore = scoreLead(updatedSignals);
+              if (
+                (enhancedScore.final_score === "high" && scoringResult.final_score !== "high") ||
+                (enhancedScore.final_score === "medium" && scoringResult.final_score === "low")
+              ) {
+                assistantResponse = generateCloserResponse(content, updatedSignals, enhancedScore, config);
+              }
+            }
+          }
+
+          // Groq-drafted response is the PRIMARY response — override deterministic wording.
+          if (groqResult.drafted_response) {
+            assistantResponse = groqResult.drafted_response;
           }
         }
+      } catch {
+        // Groq call failed — deterministic response stands as fallback.
+        logger.warn("Groq call failed; using deterministic response.");
       }
-      if (groqResult.drafted_response) assistantResponse = groqResult.drafted_response;
-      setState(prev => {
-        const msgs = [...prev.messages];
-        const lastIdx = msgs.length - 1;
-        if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-          msgs[lastIdx] = { ...msgs[lastIdx], content: assistantResponse };
-        }
-        return { ...prev, messages: msgs, signals: updatedSignals };
+    } else {
+      logger.warn("Groq rate limit reached; falling back to deterministic response.", {
+        retryAfterMs: groqCheck.retryAfterMs,
       });
-    }).catch(() => { /* Groq failed — deterministic response stands. */ });
+    }
 
     const assistantMessage: ChatMessage = {
       id: uuidv4(), session_id: state.session.id, content: assistantResponse,
