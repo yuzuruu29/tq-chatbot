@@ -11,10 +11,30 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "your-anon-key
 
 // Create Supabase client with anon key only.
 // RLS policies protect data; service-role writes happen in Edge Functions.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// The Database generic is passed so queries against views/tables are typed.
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
 // Type definitions for our database tables
 // These should match the schema defined in supabase/schema.sql
+
+type DailyLeadsView = { day: string; tenant_id: string; score: string; count: number };
+type WeeklyLeadsView = { week: string; tenant_id: string; score: string; count: number };
+type MonthlyLeadsView = { month: string; tenant_id: string; score: string; count: number };
+type CalendlyMetricsView = { tenant_id: string; shown: number; clicked: number; booked: number };
+type FunnelStepsView = { tenant_id: string; event_type: string; count: number };
+type RecentConversationsView = {
+  session_id: string;
+  visitor_id: string;
+  tenant_id: string;
+  status: string;
+  created_at: string;
+  lead_id: string | null;
+  score: string | null;
+  route: string | null;
+  message_count: number | null;
+  last_message: string | null;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -239,6 +259,14 @@ export type Database = {
           created_at: string;
         }>;
       };
+    };
+    Views: {
+      daily_leads: { Row: DailyLeadsView };
+      weekly_leads: { Row: WeeklyLeadsView };
+      monthly_leads: { Row: MonthlyLeadsView };
+      calendly_metrics: { Row: CalendlyMetricsView };
+      funnel_steps: { Row: FunnelStepsView };
+      recent_conversations: { Row: RecentConversationsView };
     };
   };
 };

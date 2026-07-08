@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type { Lead, DashboardMetrics, LeadScore } from "../types";
-import { leadService } from "../services/leadService";
-import { calendlyService } from "../services/calendlyService";
+import { dashboardService } from "../services/dashboardService";
+import { supabaseService } from "../lib/supabase";
 import { logger } from "../lib/logger";
 
 // ─── Sidebar Icons ───────────────────────────────────────────
@@ -38,6 +38,7 @@ export const Dashboard: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [funnelSteps, setFunnelSteps] = useState<Array<{ name: string; value: number; drop?: string }>>([]);
   const [hasRealFunnelData, setHasRealFunnelData] = useState(false);
+  const [connected] = useState<boolean>(supabaseService.isInitialized());
 
   useEffect(() => {
     loadDashboardData();
@@ -46,8 +47,9 @@ export const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const allLeads = await leadService.getLeadsByTenant("00000000-0000-0000-0000-000000000000");
-      setLeads(allLeads);
+      const tenantId = "00000000-0000-0000-0000-000000000000";
+      const data = await dashboardService.getDashboardData(tenantId);
+      setLeads(data.leads);
 
       const now = new Date();
       let startDate: Date;
@@ -57,44 +59,21 @@ export const Dashboard: React.FC = () => {
         case "month": startDate = new Date(now.getFullYear(), now.getMonth(), 1); break;
       }
 
-      const filteredLeads = allLeads.filter(lead => new Date(lead.created_at) >= startDate);
+      const filteredLeads = data.leads.filter(lead => new Date(lead.created_at) >= startDate);
       const scoreSplit: Record<LeadScore, number> = { low: 0, medium: 0, high: 0 };
       filteredLeads.forEach(lead => { scoreSplit[lead.score]++; });
 
-      const calendlyMetrics = calendlyService.getMetrics();
-
-      // Try real funnel data first, fall back to estimated multipliers
-      const funnelResult = leadService.getFunnelMetrics("00000000-0000-0000-0000-000000000000");
-      let realFunnelSteps: Array<{ name: string; value: number; drop?: string }> = [];
-      let hasReal = false;
-
-      if (funnelResult && funnelResult.hasRealData && funnelResult.funnelSteps.length > 1) {
-        realFunnelSteps = funnelResult.funnelSteps;
-        hasReal = true;
-      } else {
-        // Dev fallback: estimated pipeline based on lead count
-        const total = filteredLeads.length || 0;
-        realFunnelSteps = [
-          { value: total, name: "Landed" },
-          { value: Math.round(total * 0.65), name: "Engaged", drop: total > 0 ? "-35% est." : undefined },
-          { value: Math.round(total * 0.375), name: "Qualified", drop: total > 0 ? "-42% est." : undefined },
-          { value: Math.round(total * 0.29), name: "Calendly Shown" },
-          { value: Math.round(total * 0.19), name: "Clicked", drop: total > 0 ? "-36% est." : undefined },
-          { value: calendlyMetrics.booked, name: "Booked", drop: total > 0 ? "-44% est." : undefined },
-        ];
-      }
-
-      setFunnelSteps(realFunnelSteps);
-      setHasRealFunnelData(hasReal);
+      setFunnelSteps(data.funnelSteps);
+      setHasRealFunnelData(data.hasRealData);
 
       setMetrics({
         leads_today: timeRange === "today" ? filteredLeads.length : 0,
         leads_week: timeRange === "week" ? filteredLeads.length : 0,
         leads_month: timeRange === "month" ? filteredLeads.length : 0,
         score_split: scoreSplit,
-        calendly_shown: calendlyMetrics.shown,
-        calendly_clicked: calendlyMetrics.clicked,
-        calendly_booked: calendlyMetrics.booked,
+        calendly_shown: data.calendly.shown,
+        calendly_clicked: data.calendly.clicked,
+        calendly_booked: data.calendly.booked,
         funnel_steps: {},
         recent_conversations: []
       });
@@ -187,7 +166,7 @@ export const Dashboard: React.FC = () => {
         <div className="tq-sidebar-footer">
           <div className="tq-sidebar-status">
             <span className="tq-sidebar-status-dot" />
-            Supabase connected
+            {connected ? "Supabase connected" : "Local / Mock mode"}
           </div>
         </div>
       </aside>
