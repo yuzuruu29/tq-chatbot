@@ -7,11 +7,11 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
-// Dev-mode bypass: if Supabase is not configured (placeholder URL), skip the
-// auth gate so the dashboard is accessible during local development.  Auth
-// remains enforced in production where a real Supabase project is configured.
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://your-project-ref.supabase.co";
-const IS_DEV_MODE = SUPABASE_URL.includes("your-project-ref");
+// Dev-mode bypass: set VITE_DISABLE_AUTH=true in .env.local to skip auth
+// during local development. Auth is ALWAYS enforced in production unless
+// this explicit flag is set — URL string matching is deliberately avoided
+// so a misconfigured URL cannot accidentally disable auth in prod.
+const IS_DEV_MODE = import.meta.env.VITE_DISABLE_AUTH === "true";
 
 interface AuthGateProps {
   children: React.ReactNode;
