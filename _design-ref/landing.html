@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TQ Funnel ChatBot — AI Funnel Qualification Engine</title>
+<meta name="description" content="Qualify visitors, extract buying signals, score intent with deterministic rules, and route qualified prospects to the right next step. Built once. Reconfigured per client." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   TQ Funnel ChatBot — Design Tokens
+   Premium technical SaaS · Light canvas · Electric blue primary
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  /* Surface */
+  --bg:           #f4f6f9;
+  --bg-alt:       #eef1f6;
+  --surface:      #ffffff;
+  --surface-alt:  #f8f9fb;
+  --surface-dark: #0c1929;
+
+  /* Foreground */
+  --fg:           #0f1729;
+  --fg-2:         #1e293b;
+  --muted:        #64748b;
+  --meta:         #94a3b8;
+  --inverse:      #ffffff;
+
+  /* Brand */
+  --primary:      #0b5fff;
+  --primary-soft: #e8f0ff;
+  --primary-mid:  #3b82f6;
+  --accent:       #00d4aa;
+  --accent-soft:  #e6faf4;
+  --navy:         #0c1929;
+  --navy-mid:     #162544;
+
+  /* Status */
+  --success:      #10b981;
+  --success-soft: #ecfdf5;
+  --warn:         #f59e0b;
+  --warn-soft:    #fffbeb;
+  --danger:       #ef4444;
+  --danger-soft:  #fef2f2;
+
+  /* Border */
+  --border:       #e2e8f0;
+  --border-soft:  #f1f5f9;
+  --border-focus: #0b5fff;
+
+  /* Typography */
+  --font:         'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono:         'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale */
+  --text-xs:    0.75rem;
+  --text-sm:    0.8125rem;
+  --text-base:  0.9375rem;
+  --text-lg:    1.0625rem;
+  --text-xl:    1.25rem;
+  --text-2xl:   1.5rem;
+  --text-3xl:   1.875rem;
+  --text-4xl:   2.5rem;
+  --text-5xl:   3.25rem;
+  --text-hero:  3.75rem;
+
+  /* Spacing */
+  --sp-1:  4px;  --sp-2:  8px;  --sp-3:  12px;  --sp-4:  16px;
+  --sp-5:  20px; --sp-6:  24px; --sp-8:  32px;  --sp-10: 40px;
+  --sp-12: 48px; --sp-16: 64px; --sp-20: 80px;  --sp-24: 96px;
+
+  /* Radius */
+  --r-sm:  6px;  --r-md:  10px;  --r-lg:  14px;  --r-xl:  20px;
+  --r-pill: 9999px;
+
+  /* Shadows */
+  --shadow-xs:   0 1px 2px rgba(15,23,41,0.04);
+  --shadow-sm:   0 1px 3px rgba(15,23,41,0.06), 0 1px 2px rgba(15,23,41,0.04);
+  --shadow-md:   0 4px 6px -1px rgba(15,23,41,0.07), 0 2px 4px -2px rgba(15,23,41,0.05);
+  --shadow-lg:   0 10px 15px -3px rgba(15,23,41,0.08), 0 4px 6px -4px rgba(15,23,41,0.04);
+  --shadow-xl:   0 20px 25px -5px rgba(15,23,41,0.08), 0 8px 10px -6px rgba(15,23,41,0.03);
+  --shadow-card: 0 1px 3px rgba(15,23,41,0.05), 0 0 0 1px rgba(15,23,41,0.04);
+  --shadow-glow: 0 0 0 3px rgba(11,95,255,0.12);
+
+  /* Motion */
+  --ease:  cubic-bezier(0.16, 1, 0.3, 1);
+  --dur:   200ms;
+  --dur-slow: 400ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Reset + Base
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body {
+  font-family: var(--font);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  overflow-x: hidden;
+}
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; display: block; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, textarea { font-family: inherit; }
+
+/* Focus — visible keyboard ring, hidden for mouse */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* Reduced motion — strip transforms, keep opacity */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  [data-reveal] { opacity: 1; transform: none; }
+  .hero-badge-dot { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Layout
+   ═══════════════════════════════════════════════════════════════ */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--sp-6);
+}
+.container-wide {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0 var(--sp-6);
+}
+.section {
+  padding: var(--sp-24) 0;
+}
+.section-alt {
+  background: var(--surface);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Utility
+   ═══════════════════════════════════════════════════════════════ */
+.section-label {
+  display: inline-block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 5px 14px;
+  border-radius: var(--r-pill);
+  margin-bottom: var(--sp-4);
+}
+.section-title {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--fg);
+  margin-bottom: var(--sp-3);
+  letter-spacing: -0.02em;
+}
+.section-desc {
+  font-size: var(--text-lg);
+  color: var(--muted);
+  max-width: 600px;
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Buttons
+   ═══════════════════════════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+  padding: 12px 28px;
+  border-radius: var(--r-md);
+  transition: all var(--dur) var(--ease);
+  white-space: nowrap;
+  position: relative;
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--inverse);
+  box-shadow: 0 1px 2px rgba(11,95,255,0.2), 0 4px 12px rgba(11,95,255,0.15);
+}
+.btn-primary:hover {
+  background: #0952e0;
+  box-shadow: 0 1px 2px rgba(11,95,255,0.25), 0 6px 16px rgba(11,95,255,0.2);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  background: #0747c7;
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(11,95,255,0.15);
+}
+.btn:disabled, .btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn-secondary {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-xs);
+}
+.btn-secondary:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 18px;
+}
+.btn-ghost:hover { color: var(--primary); background: var(--primary-soft); }
+.btn-sm {
+  font-size: var(--text-sm);
+  padding: 8px 18px;
+}
+.btn-icon {
+  width: 20px; height: 20px;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Header / Nav
+   ═══════════════════════════════════════════════════════════════ */
+.header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  background: rgba(244,246,249,0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.header.scrolled {
+  background: rgba(255,255,255,0.95);
+  box-shadow: var(--shadow-sm);
+}
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--sp-6);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  text-decoration: none;
+  color: var(--fg);
+}
+.brand-mark {
+  width: 36px; height: 36px;
+  background: var(--primary);
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: white;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  font-family: var(--mono);
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.brand-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.nav a {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--muted);
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  transition: all var(--dur) var(--ease);
+  text-decoration: none;
+}
+.nav a:hover {
+  color: var(--fg);
+  background: var(--bg-alt);
+  text-decoration: none;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Hero
+   ═══════════════════════════════════════════════════════════════ */
+.hero {
+  padding: 140px 0 80px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -200px; right: -200px;
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(11,95,255,0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-16);
+  align-items: center;
+}
+.hero-content { max-width: 560px; }
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border: 1px solid rgba(11,95,255,0.1);
+  padding: 6px 16px;
+  border-radius: var(--r-pill);
+  margin-bottom: var(--sp-6);
+}
+.hero-badge-dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+.hero h1 {
+  font-size: var(--text-hero);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--fg);
+  margin-bottom: var(--sp-5);
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--primary);
+}
+.hero-sub {
+  font-size: var(--text-lg);
+  color: var(--muted);
+  line-height: 1.65;
+  margin-bottom: var(--sp-8);
+  max-width: 480px;
+}
+.hero-actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-10);
+}
+.proof-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+.proof-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+.proof-dot {
+  width: 5px; height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Hero Visual — Pipeline + Lead Card
+   ═══════════════════════════════════════════════════════════════ */
+.hero-visual {
+  position: relative;
+}
+.pipeline-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--sp-6);
+  position: relative;
+  overflow: hidden;
+}
+.pipeline-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+.pipeline-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-6);
+}
+.pipeline-header-icon {
+  width: 36px; height: 36px;
+  background: var(--primary-soft);
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+}
+.pipeline-header-icon svg {
+  width: 18px; height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pipeline-header h4 {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+}
+.pipeline-header span {
+  font-size: var(--text-xs);
+  color: var(--meta);
+  margin-left: auto;
+  font-family: var(--mono);
+}
+.pipeline-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+  flex-wrap: wrap;
+}
+.pipeline-step {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  transition: all var(--dur) var(--ease);
+}
+.pipeline-step-active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(11,95,255,0.2);
+}
+.pipeline-arrow {
+  color: var(--meta);
+  flex-shrink: 0;
+}
+.pipeline-arrow svg {
+  width: 16px; height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+}
+
+/* Lead preview card */
+.lead-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  margin-top: var(--sp-4);
+}
+.lead-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+.lead-card-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--meta);
+}
+.lead-score-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lead-score-high {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.lead-rows { display: flex; flex-direction: column; gap: var(--sp-3); }
+.lead-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.lead-label {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.lead-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+}
+.lead-reason {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-weight: 500;
+  background: var(--surface);
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-soft);
+  margin-top: var(--sp-2);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   System Value Cards
+   ═══════════════════════════════════════════════════════════════ */
+.value-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-5);
+  margin-top: var(--sp-10);
+}
+.value-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  transition: all var(--dur) var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.value-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 3px; height: 100%;
+  border-radius: 0 2px 2px 0;
+  transition: opacity var(--dur) var(--ease);
+  opacity: 0;
+}
+.value-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.value-card:hover::before { opacity: 1; }
+.value-card:nth-child(1)::before { background: var(--primary); }
+.value-card:nth-child(2)::before { background: var(--accent); }
+.value-card:nth-child(3)::before { background: var(--warn); }
+.value-card:nth-child(4)::before { background: var(--success); }
+
+.value-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--sp-4);
+}
+.value-icon svg {
+  width: 20px; height: 20px;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.value-icon-blue  { background: var(--primary-soft); color: var(--primary); }
+.value-icon-teal  { background: var(--accent-soft); color: var(--accent); }
+.value-icon-amber { background: var(--warn-soft); color: var(--warn); }
+.value-icon-green { background: var(--success-soft); color: var(--success); }
+
+.value-card h3 {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--fg);
+  margin-bottom: var(--sp-2);
+}
+.value-card p {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   How It Works — Pipeline
+   ═══════════════════════════════════════════════════════════════ */
+.pipeline-flow {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-10);
+  overflow-x: auto;
+  padding-bottom: var(--sp-4);
+  -webkit-overflow-scrolling: touch;
+}
+.pipeline-flow-step {
+  flex: 1;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  text-align: center;
+  position: relative;
+  transition: all var(--dur) var(--ease);
+}
+.pipeline-flow-step:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.step-num {
+  width: 28px; height: 28px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto var(--sp-3);
+}
+.pipeline-flow-step h4 {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: var(--sp-1);
+}
+.pipeline-flow-step p {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: 1.5;
+}
+.step-connector {
+  display: flex;
+  align-items: center;
+  color: var(--meta);
+  flex-shrink: 0;
+}
+.step-connector svg {
+  width: 20px; height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Config Layer
+   ═══════════════════════════════════════════════════════════════ */
+.config-section {
+  background: var(--surface-dark);
+  color: var(--inverse);
+}
+.config-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-16);
+  align-items: center;
+}
+.config-content .section-label {
+  background: rgba(11,95,255,0.15);
+  color: #6da3ff;
+}
+.config-content .section-title {
+  color: var(--inverse);
+}
+.config-content .section-desc {
+  color: rgba(255,255,255,0.6);
+}
+.config-message {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--inverse);
+  margin-top: var(--sp-6);
+  line-height: 1.3;
+}
+.config-message em {
+  font-style: normal;
+  color: var(--accent);
+}
+.config-panel {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  backdrop-filter: blur(8px);
+}
+.config-panel-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.config-items { display: flex; flex-direction: column; gap: var(--sp-3); }
+.config-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: var(--r-sm);
+  transition: all var(--dur) var(--ease);
+}
+.config-item:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.1);
+}
+.config-item-icon {
+  width: 32px; height: 32px;
+  background: rgba(11,95,255,0.12);
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: #6da3ff;
+  flex-shrink: 0;
+}
+.config-item-icon svg {
+  width: 16px; height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.config-item-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: rgba(255,255,255,0.7);
+}
+.config-item-value {
+  font-size: var(--text-xs);
+  font-family: var(--mono);
+  color: rgba(255,255,255,0.35);
+  margin-left: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Dashboard Preview
+   ═══════════════════════════════════════════════════════════════ */
+.dashboard-preview {
+  margin-top: var(--sp-10);
+}
+.dash-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+}
+.dash-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--fg);
+}
+.dash-subtitle {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.dash-tabs {
+  display: flex;
+  gap: var(--sp-1);
+}
+.dash-tab {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: var(--r-sm);
+  transition: all var(--dur) var(--ease);
+}
+.dash-tab:hover { color: var(--fg); background: var(--bg); }
+.dash-tab-active {
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 600;
+}
+
+/* KPI grid */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+.kpi-card {
+  background: var(--surface);
+  padding: var(--sp-5) var(--sp-6);
+}
+.kpi-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--sp-1);
+}
+.kpi-value {
+  font-size: var(--text-2xl);
+  font-weight: 800;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.kpi-change {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  margin-top: var(--sp-1);
+}
+.kpi-up { color: var(--success); }
+.kpi-down { color: var(--danger); }
+
+/* Funnel steps */
+.funnel-section {
+  padding: var(--sp-5) var(--sp-6);
+  border-top: 1px solid var(--border);
+}
+.funnel-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--meta);
+  margin-bottom: var(--sp-4);
+}
+.funnel-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  overflow-x: auto;
+}
+.funnel-step {
+  flex: 1;
+  min-width: 110px;
+  text-align: center;
+  padding: var(--sp-3);
+  background: var(--bg);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-soft);
+}
+.funnel-step-value {
+  font-size: var(--text-xl);
+  font-weight: 800;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.funnel-step-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.funnel-arrow {
+  color: var(--meta);
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.funnel-drop {
+  font-size: 10px;
+  color: var(--danger);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Conversation table */
+.table-section {
+  border-top: 1px solid var(--border);
+}
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-6);
+}
+.table-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--meta);
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+tbody td {
+  font-size: var(--text-sm);
+  color: var(--fg);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+tbody tr:hover { background: var(--surface-alt); }
+.score-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.score-high { background: var(--success-soft); color: var(--success); }
+.score-medium { background: var(--warn-soft); color: var(--warn); }
+.score-low { background: var(--danger-soft); color: var(--danger); }
+.route-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.booking-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+}
+.booking-yes { background: var(--success-soft); color: var(--success); }
+.booking-pending { background: var(--warn-soft); color: var(--warn); }
+.booking-no { background: var(--bg); color: var(--meta); }
+
+/* ═══════════════════════════════════════════════════════════════
+   Architecture Section
+   ═══════════════════════════════════════════════════════════════ */
+.arch-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin-top: var(--sp-10);
+}
+.arch-node {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4) var(--sp-5);
+  text-align: center;
+  transition: all var(--dur) var(--ease);
+}
+.arch-node:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.arch-node-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg);
+}
+.arch-node-desc {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  margin-top: 2px;
+}
+.arch-arrow {
+  width: 2px;
+  height: 24px;
+  background: var(--border);
+  position: relative;
+}
+.arch-arrow::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--border);
+}
+.arch-node-highlight {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.arch-side-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  max-width: 260px;
+}
+.arch-side-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+  margin-bottom: var(--sp-3);
+}
+.arch-side-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.arch-side-item {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.arch-side-dot {
+  width: 4px; height: 4px;
+  background: var(--primary);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.arch-layout {
+  display: flex;
+  gap: var(--sp-10);
+  align-items: flex-start;
+  justify-content: center;
+  margin-top: var(--sp-10);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CTA
+   ═══════════════════════════════════════════════════════════════ */
+.cta-section {
+  text-align: center;
+  padding: var(--sp-24) 0;
+}
+.cta-card {
+  background: var(--surface-dark);
+  border-radius: var(--r-xl);
+  padding: var(--sp-16) var(--sp-8);
+  position: relative;
+  overflow: hidden;
+}
+.cta-card::before {
+  content: '';
+  position: absolute;
+  top: -100px; left: 50%;
+  transform: translateX(-50%);
+  width: 500px; height: 300px;
+  background: radial-gradient(ellipse, rgba(11,95,255,0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+.cta-card h2 {
+  font-size: var(--text-3xl);
+  font-weight: 800;
+  color: var(--inverse);
+  margin-bottom: var(--sp-4);
+  position: relative;
+}
+.cta-card p {
+  font-size: var(--text-lg);
+  color: rgba(255,255,255,0.6);
+  max-width: 500px;
+  margin: 0 auto var(--sp-8);
+  position: relative;
+}
+.cta-card .btn { position: relative; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Footer
+   ═══════════════════════════════════════════════════════════════ */
+.footer {
+  padding: var(--sp-12) 0 var(--sp-8);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.footer-copy {
+  font-size: var(--text-xs);
+  color: var(--meta);
+  max-width: 320px;
+  line-height: 1.6;
+}
+.footer-links {
+  display: flex;
+  gap: var(--sp-10);
+}
+.footer-col h5 {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  margin-bottom: var(--sp-3);
+}
+.footer-col a {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  padding: 4px 0;
+  transition: color var(--dur) var(--ease);
+  text-decoration: none;
+}
+.footer-col a:hover {
+  color: var(--primary);
+  text-decoration: none;
+}
+.footer-bottom {
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.footer-bottom-text {
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Chat Widget Toggle (floating)
+   ═══════════════════════════════════════════════════════════════ */
+.chat-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--primary);
+  color: white;
+  padding: 14px 24px;
+  border-radius: var(--r-pill);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(11,95,255,0.25), 0 8px 24px rgba(11,95,255,0.15);
+  transition: all var(--dur) var(--ease);
+}
+.chat-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(11,95,255,0.3), 0 12px 32px rgba(11,95,255,0.2);
+}
+.chat-toggle svg {
+  width: 18px; height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Scroll reveal
+   ═══════════════════════════════════════════════════════════════ */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+[data-reveal].revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+[data-reveal-delay="1"] { transition-delay: 0.08s; }
+[data-reveal-delay="2"] { transition-delay: 0.16s; }
+[data-reveal-delay="3"] { transition-delay: 0.24s; }
+[data-reveal-delay="4"] { transition-delay: 0.32s; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .hero-badge-dot { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .hero-inner { grid-template-columns: 1fr; gap: var(--sp-10); }
+  .hero h1 { font-size: var(--text-4xl); }
+  .value-grid { grid-template-columns: repeat(2, 1fr); }
+  .config-inner { grid-template-columns: 1fr; gap: var(--sp-10); }
+  .arch-layout { flex-direction: column; align-items: center; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .footer-links { gap: var(--sp-6); }
+}
+@media (max-width: 768px) {
+  .hero { padding: 110px 0 60px; }
+  .hero h1 { font-size: var(--text-3xl); }
+  .section { padding: var(--sp-16) 0; }
+  .section-title { font-size: var(--text-2xl); }
+  .value-grid { grid-template-columns: 1fr; }
+  .pipeline-flow { flex-direction: column; }
+  .step-connector { transform: rotate(90deg); }
+  .nav { display: none; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .funnel-steps { flex-wrap: wrap; }
+  .funnel-step { min-width: 80px; }
+  .footer-inner { flex-direction: column; }
+  .footer-links { flex-direction: column; gap: var(--sp-4); }
+  .footer-bottom { flex-direction: column; gap: var(--sp-3); text-align: center; }
+  .hero-actions { flex-direction: column; }
+  .hero-actions .btn { width: 100%; }
+  .cta-card { padding: var(--sp-10) var(--sp-5); }
+  table { font-size: var(--text-xs); }
+  thead th, tbody td { padding: var(--sp-2) var(--sp-3); }
+}
+@media (max-width: 480px) {
+  .hero h1 { font-size: var(--text-2xl); }
+  .hero-sub { font-size: var(--text-base); }
+  .proof-strip { flex-direction: column; gap: var(--sp-2); }
+  .pipeline-steps { flex-direction: column; align-items: stretch; }
+  .pipeline-arrow { transform: rotate(90deg); align-self: center; }
+  .dash-tabs { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Header
+     ═══════════════════════════════════════════════════════════════ -->
+<header class="header" id="header" data-od-id="header" role="banner">
+  <div class="header-inner">
+    <a href="#" class="brand" data-od-id="brand" aria-label="TQ Funnel ChatBot — Home">
+      <div class="brand-mark" aria-hidden="true">TQ</div>
+      <div class="brand-text">
+        <span class="brand-name">Tech Quarters</span>
+        <span class="brand-sub">Funnel ChatBot</span>
+      </div>
+    </a>
+    <nav class="nav" data-od-id="nav" aria-label="Main navigation">
+      <a href="#system-value">System</a>
+      <a href="#how-it-works">Pipeline</a>
+      <a href="#config">Config Layer</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#architecture">Architecture</a>
+    </nav>
+    <div class="header-actions">
+      <a href="dashboard.html" class="btn btn-ghost btn-sm">Dashboard</a>
+      <button class="btn btn-primary btn-sm" onclick="document.querySelector('.chat-toggle').click()">
+        Open Chat Demo
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Hero
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="hero" data-od-id="hero" aria-label="Hero">
+  <div class="container">
+    <div class="hero-inner">
+      <div class="hero-content" data-reveal>
+        <div class="hero-badge">
+          <span class="hero-badge-dot"></span>
+          Funnel Qualification Engine
+        </div>
+        <h1>AI funnel qualification, packaged for <em>repeatable</em> client deployments.</h1>
+        <p class="hero-sub">
+          TQ Funnel ChatBot qualifies visitors, extracts buying signals, scores intent with deterministic rules, and routes qualified prospects to the right next step.
+        </p>
+        <div class="hero-actions">
+          <a href="chat.html" class="btn btn-primary">
+            <svg class="btn-icon" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            Open Chat Demo
+          </a>
+          <a href="dashboard.html" class="btn btn-secondary">
+            View Dashboard
+            <svg class="btn-icon" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+        </div>
+        <div class="proof-strip">
+          <span class="proof-item"><span class="proof-dot"></span>Deterministic scoring</span>
+          <span class="proof-item"><span class="proof-dot"></span>Supabase-ready</span>
+          <span class="proof-item"><span class="proof-dot"></span>n8n event contract</span>
+          <span class="proof-item"><span class="proof-dot"></span>Calendly routing</span>
+          <span class="proof-item"><span class="proof-dot"></span>Reusable by config</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" data-reveal data-reveal-delay="1">
+        <div class="pipeline-card" data-od-id="pipeline-card">
+          <div class="pipeline-header">
+            <div class="pipeline-header-icon">
+              <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </div>
+            <h4>Pipeline Preview</h4>
+            <span>Live</span>
+          </div>
+          <div class="pipeline-steps">
+            <div class="pipeline-step">Visitor</div>
+            <span class="pipeline-arrow"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+            <div class="pipeline-step">Qualification</div>
+            <span class="pipeline-arrow"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+            <div class="pipeline-step pipeline-step-active">Score</div>
+            <span class="pipeline-arrow"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+            <div class="pipeline-step">Route</div>
+          </div>
+          <div class="lead-card">
+            <div class="lead-card-header">
+              <span class="lead-card-title">Lead Intelligence</span>
+              <span class="lead-score-chip lead-score-high">High</span>
+            </div>
+            <div class="lead-rows">
+              <div class="lead-row">
+                <span class="lead-label">Lead Score</span>
+                <span class="lead-value">High — Qualified</span>
+              </div>
+              <div class="lead-row">
+                <span class="lead-label">Route</span>
+                <span class="lead-value">Calendly</span>
+              </div>
+              <div class="lead-reason">
+                Business context confirmed + clear problem statement + time urgency detected
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     System Value
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="section section-alt" id="system-value" data-od-id="system-value">
+  <div class="container" style="text-align:center;">
+    <span class="section-label" data-reveal>System Value</span>
+    <h2 class="section-title" data-reveal>A reusable funnel operator for client sites.</h2>
+    <p class="section-desc" style="margin:0 auto;" data-reveal>
+      Qualify visitors, extract buying signals, score intent, and route the right leads to the calendar. The LLM handles conversation. The rules decide the score.
+    </p>
+    <div class="value-grid">
+      <div class="value-card" data-reveal data-reveal-delay="1">
+        <div class="value-icon value-icon-blue">
+          <svg viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </div>
+        <h3>Qualifies before booking</h3>
+        <p>Only strong-fit leads are routed to the calendar. Everyone else gets a useful next step, not a dead end.</p>
+      </div>
+      <div class="value-card" data-reveal data-reveal-delay="2">
+        <div class="value-icon value-icon-teal">
+          <svg viewBox="0 0 24 24" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Scores with rules, not vibes</h3>
+        <p>Claude can extract signals from conversation, but deterministic logic decides the final score. Every time.</p>
+      </div>
+      <div class="value-card" data-reveal data-reveal-delay="3">
+        <div class="value-icon value-icon-amber">
+          <svg viewBox="0 0 24 24" stroke="currentColor"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        </div>
+        <h3>Logs every decision</h3>
+        <p>Messages, scoring signals, events, and routing decisions are stored and auditable. No black boxes.</p>
+      </div>
+      <div class="value-card" data-reveal data-reveal-delay="4">
+        <div class="value-icon value-icon-green">
+          <svg viewBox="0 0 24 24" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        </div>
+        <h3>Reusable by config</h3>
+        <p>Swap the brand, prompt, questions, labels, and integrations for another client. Same engine, new deployment.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     How It Works
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="section" id="how-it-works" data-od-id="how-it-works">
+  <div class="container" style="text-align:center;">
+    <span class="section-label" data-reveal>Qualification Pipeline</span>
+    <h2 class="section-title" data-reveal>From visitor intent to booked call</h2>
+    <p class="section-desc" style="margin:0 auto;" data-reveal>
+      Every step is logged. Every score is explainable. Every routing decision is auditable.
+    </p>
+    <div class="pipeline-flow" data-reveal>
+      <div class="pipeline-flow-step">
+        <div class="step-num">1</div>
+        <h4>Visitor starts chat</h4>
+        <p>Embedded widget opens on any client page</p>
+      </div>
+      <div class="step-connector"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+      <div class="pipeline-flow-step">
+        <div class="step-num">2</div>
+        <h4>Bot qualifies intent</h4>
+        <p>Structured questions extract business context</p>
+      </div>
+      <div class="step-connector"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+      <div class="pipeline-flow-step">
+        <div class="step-num">3</div>
+        <h4>Signals extracted</h4>
+        <p>Claude parses conversation into structured signals</p>
+      </div>
+      <div class="step-connector"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+      <div class="pipeline-flow-step">
+        <div class="step-num">4</div>
+        <h4>Deterministic score</h4>
+        <p>Rules engine assigns High / Medium / Low</p>
+      </div>
+      <div class="step-connector"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+      <div class="pipeline-flow-step">
+        <div class="step-num">5</div>
+        <h4>Route to Calendly</h4>
+        <p>Qualified leads get the booking link</p>
+      </div>
+      <div class="step-connector"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+      <div class="pipeline-flow-step">
+        <div class="step-num">6</div>
+        <h4>Dashboard shows leaks</h4>
+        <p>Funnel visibility from landing to booking</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Config Layer
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="section config-section" id="config" data-od-id="config">
+  <div class="container">
+    <div class="config-inner">
+      <div class="config-content" data-reveal>
+        <span class="section-label">Client Config Layer</span>
+        <h2 class="section-title">Build once. Reconfigure per client.</h2>
+        <p class="section-desc">
+          Every client deployment shares the same qualification engine. Swap the brand, prompt, questions, scoring thresholds, Calendly URL, alert channel, and pipeline labels — without touching the core system.
+        </p>
+        <p class="config-message">
+          Same engine. <em>Different client.</em> Zero rework. Same auditable pipeline.
+        </p>
+      </div>
+      <div class="config-panel" data-reveal data-reveal-delay="1">
+        <div class="config-panel-title">Client Configuration</div>
+        <div class="config-items">
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            </div>
+            <span class="config-item-label">Brand & Logo</span>
+            <span class="config-item-value">per client</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            </div>
+            <span class="config-item-label">System Prompt</span>
+            <span class="config-item-value">customizable</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </div>
+            <span class="config-item-label">Qualification Questions</span>
+            <span class="config-item-value">configurable</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            </div>
+            <span class="config-item-label">Scoring Thresholds</span>
+            <span class="config-item-value">deterministic</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+            <span class="config-item-label">Calendly URL</span>
+            <span class="config-item-value">per client</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+            </div>
+            <span class="config-item-label">Alert Channel</span>
+            <span class="config-item-value">n8n webhook</span>
+          </div>
+          <div class="config-item">
+            <div class="config-item-icon">
+              <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <span class="config-item-label">Pipeline Labels</span>
+            <span class="config-item-value">custom tags</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Dashboard Preview
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="section section-alt" id="dashboard" data-od-id="dashboard-preview">
+  <div class="container">
+    <div style="text-align:center;">
+      <span class="section-label" data-reveal>Funnel Dashboard</span>
+      <h2 class="section-title" data-reveal>Where is the funnel leaking?</h2>
+      <p class="section-desc" style="margin:0 auto;" data-reveal>
+        Lead qualification, routing, and booking visibility — all in one operational view.
+      </p>
+    </div>
+    <div class="dashboard-preview" data-reveal>
+      <div class="dash-card">
+        <div class="dash-header">
+          <div>
+            <div class="dash-title">Funnel Dashboard</div>
+            <div class="dash-subtitle">Lead qualification, routing, and booking visibility</div>
+          </div>
+          <div class="dash-tabs">
+            <button class="dash-tab dash-tab-active">This Week</button>
+            <button class="dash-tab">This Month</button>
+            <button class="dash-tab">All Time</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Leads Today</div>
+            <div class="kpi-value">12</div>
+            <div class="kpi-change kpi-up">+18% vs yesterday</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Qualified</div>
+            <div class="kpi-value">7</div>
+            <div class="kpi-change kpi-up">58% rate</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Nurture</div>
+            <div class="kpi-value">3</div>
+            <div class="kpi-change" style="color:var(--warn)">25% of total</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Booked</div>
+            <div class="kpi-value">4</div>
+            <div class="kpi-change kpi-up">57% of qualified</div>
+          </div>
+        </div>
+
+        <div class="funnel-section">
+          <div class="funnel-label">Funnel Steps</div>
+          <div class="funnel-steps">
+            <div class="funnel-step">
+              <div class="funnel-step-value">48</div>
+              <div class="funnel-step-name">Landed</div>
+            </div>
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-step">
+              <div class="funnel-step-value">31</div>
+              <div class="funnel-step-name">Engaged</div>
+              <div class="funnel-drop">-35% drop</div>
+            </div>
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-step">
+              <div class="funnel-step-value">18</div>
+              <div class="funnel-step-name">Qualified</div>
+              <div class="funnel-drop">-42% drop</div>
+            </div>
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-step">
+              <div class="funnel-step-value">14</div>
+              <div class="funnel-step-name">Calendly Shown</div>
+            </div>
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-step">
+              <div class="funnel-step-value">9</div>
+              <div class="funnel-step-name">Clicked</div>
+              <div class="funnel-drop">-36% drop</div>
+            </div>
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-step">
+              <div class="funnel-step-value">5</div>
+              <div class="funnel-step-name">Booked</div>
+              <div class="funnel-drop">-44% drop</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-section">
+          <div class="table-header">
+            <span class="table-title">Recent Conversations</span>
+            <a href="dashboard.html" class="btn btn-ghost btn-sm">View All →</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Lead</th>
+                <th>Business</th>
+                <th>Score</th>
+                <th>Route</th>
+                <th>Score Reason</th>
+                <th>Booking</th>
+                <th>Last Activity</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:600;">Sarah Chen</td>
+                <td>Horizon Digital</td>
+                <td><span class="score-badge score-high">High</span></td>
+                <td><span class="route-badge">Calendly</span></td>
+                <td style="color:var(--muted);font-size:var(--text-xs);">Business + clear problem + urgency</td>
+                <td><span class="booking-badge booking-yes">Booked</span></td>
+                <td style="color:var(--meta);font-size:var(--text-xs);">2 min ago</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">Marcus Johnson</td>
+                <td>Apex Solutions</td>
+                <td><span class="score-badge score-high">High</span></td>
+                <td><span class="route-badge">Calendly</span></td>
+                <td style="color:var(--muted);font-size:var(--text-xs);">Budget confirmed + timeline set</td>
+                <td><span class="booking-badge booking-pending">Pending</span></td>
+                <td style="color:var(--meta);font-size:var(--text-xs);">14 min ago</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">Priya Patel</td>
+                <td>NovaTech</td>
+                <td><span class="score-badge score-medium">Medium</span></td>
+                <td><span class="route-badge" style="background:var(--warn-soft);color:var(--warn);">Nurture</span></td>
+                <td style="color:var(--muted);font-size:var(--text-xs);">Interested but no timeline</td>
+                <td><span class="booking-badge booking-no">—</span></td>
+                <td style="color:var(--meta);font-size:var(--text-xs);">1 hr ago</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">James Wilson</td>
+                <td>—</td>
+                <td><span class="score-badge score-low">Low</span></td>
+                <td><span class="route-badge" style="background:var(--danger-soft);color:var(--danger);">Low Priority</span></td>
+                <td style="color:var(--muted);font-size:var(--text-xs);">Exploring only + no business context</td>
+                <td><span class="booking-badge booking-no">—</span></td>
+                <td style="color:var(--meta);font-size:var(--text-xs);">3 hrs ago</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">Elena Rodriguez</td>
+                <td>Meridian Group</td>
+                <td><span class="score-badge score-high">High</span></td>
+                <td><span class="route-badge">Calendly</span></td>
+                <td style="color:var(--muted);font-size:var(--text-xs);">Decision maker + budget ready</td>
+                <td><span class="booking-badge booking-yes">Booked</span></td>
+                <td style="color:var(--meta);font-size:var(--text-xs);">5 hrs ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Architecture
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="section" id="architecture" data-od-id="architecture">
+  <div class="container" style="text-align:center;">
+    <span class="section-label" data-reveal>System Architecture</span>
+    <h2 class="section-title" data-reveal>How the pieces fit together</h2>
+    <p class="section-desc" style="margin:0 auto;" data-reveal>
+      A modular pipeline where each layer is independently configurable and replaceable. The LLM handles conversation and extraction. Final scoring is deterministic.
+    </p>
+
+    <div class="arch-layout" data-reveal>
+      <div class="arch-flow">
+        <div class="arch-node">
+          <div class="arch-node-title">Client Website</div>
+          <div class="arch-node-desc">Embedded chat widget on any page</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node">
+          <div class="arch-node-title">Conversation Engine</div>
+          <div class="arch-node-desc">Structured qualification flow</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node arch-node-highlight">
+          <div class="arch-node-title">Claude Extraction</div>
+          <div class="arch-node-desc">LLM parses signals from conversation</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node arch-node-highlight">
+          <div class="arch-node-title">Deterministic Scoring</div>
+          <div class="arch-node-desc">Rules engine — consistent, explainable</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node">
+          <div class="arch-node-title">Supabase</div>
+          <div class="arch-node-desc">Leads, messages, signals, events</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node">
+          <div class="arch-node-title">n8n Automation</div>
+          <div class="arch-node-desc">Webhooks, alerts, pipeline sync</div>
+        </div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node">
+          <div class="arch-node-title">Calendly / Alerts / Dashboard</div>
+          <div class="arch-node-desc">Routing, notifications, funnel visibility</div>
+        </div>
+      </div>
+
+      <div class="arch-side-box" data-reveal data-reveal-delay="1">
+        <div class="arch-side-title">Client Config Layer</div>
+        <div class="arch-side-items">
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Brand & Logo</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>System Prompt</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Qualification Questions</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Scoring Thresholds</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Calendly URL</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Alert Channel</div>
+          <div class="arch-side-item"><span class="arch-side-dot"></span>Pipeline Labels</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CTA
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="cta-section" data-od-id="cta">
+  <div class="container">
+    <div class="cta-card" data-reveal>
+      <h2>From visitor intent to booked call</h2>
+      <p>Every decision logged. Every score explainable. Every deployment reconfigurable. Open the chat demo to see the qualification engine work.</p>
+      <div style="display:flex;gap:var(--sp-3);justify-content:center;flex-wrap:wrap;">
+        <a href="chat.html" class="btn btn-primary">
+          <svg class="btn-icon" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Open Chat Demo
+        </a>
+        <a href="dashboard.html" class="btn btn-secondary" style="border-color:rgba(255,255,255,0.2);color:white;">
+          View Dashboard
+          <svg class="btn-icon" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Footer
+     ═══════════════════════════════════════════════════════════════ -->
+<footer class="footer" data-od-id="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer-inner">
+      <div>
+        <div class="footer-brand">
+          <div class="brand-mark" style="width:28px;height:28px;font-size:12px;">TQ</div>
+          <span style="font-weight:700;font-size:var(--text-sm);">Tech Quarters</span>
+        </div>
+        <p class="footer-copy">
+          A reusable funnel operator for client sites. Qualify visitors, extract buying signals, score intent, and route the right leads to the calendar.
+        </p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h5>System</h5>
+          <a href="#system-value">Value Proposition</a>
+          <a href="#how-it-works">Pipeline Flow</a>
+          <a href="#config">Config Layer</a>
+          <a href="#architecture">Architecture</a>
+        </div>
+        <div class="footer-col">
+          <h5>Product</h5>
+          <a href="dashboard.html">Funnel Dashboard</a>
+          <a href="chat.html">Chat Demo</a>
+          <a href="#">Decision Log</a>
+        </div>
+        <div class="footer-col">
+          <h5>Resources</h5>
+          <a href="#">System Structure</a>
+          <a href="#">Reconfiguration Guide</a>
+          <a href="#">Cost Breakdown</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="footer-bottom-text">© 2026 Tech Quarters Funnel ChatBot. Built once. Reconfigured per client.</span>
+      <span class="footer-bottom-text" style="font-family:var(--mono);font-size:11px;">v1.0.0</span>
+    </div>
+  </div>
+</footer>
+
+<!-- Chat toggle -->
+<a href="chat.html" class="chat-toggle" data-od-id="chat-toggle">
+  <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+  Qualify a lead
+</a>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Scripts
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  // Header scroll state
+  var header = document.getElementById('header');
+  window.addEventListener('scroll', function() {
+    header.classList.toggle('scrolled', window.scrollY > 20);
+  }, { passive: true });
+
+  // Scroll reveal — respects reduced-motion
+  var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var reveals = document.querySelectorAll('[data-reveal]');
+  if (prefersReduced) {
+    reveals.forEach(function(el) { el.classList.add('revealed'); });
+  } else if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('revealed');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+    reveals.forEach(function(el) { io.observe(el); });
+  } else {
+    reveals.forEach(function(el) { el.classList.add('revealed'); });
+  }
+
+  // Smooth scroll for anchor links — respects reduced-motion
+  document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+    a.addEventListener('click', function(e) {
+      var target = document.querySelector(a.getAttribute('href'));
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth', block: 'start' });
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

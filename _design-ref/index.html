@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TQ Funnel ChatBot — Reusable Funnel Qualification Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --fg: #0f1729; --muted: #64748b; --meta: #94a3b8;
+  --primary: #0b5fff; --primary-soft: #e8f0ff; --accent: #00d4aa; --accent-soft: #e6faf4;
+  --border: #e2e8f0; --border-soft: #f1f5f9;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --text-xs: 0.75rem; --text-sm: 0.8125rem; --text-base: 0.9375rem; --text-lg: 1.0625rem;
+  --text-xl: 1.25rem; --text-2xl: 1.5rem; --text-3xl: 1.875rem; --text-4xl: 2.5rem;
+  --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --sp-10: 40px; --sp-12: 48px; --sp-16: 64px;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-pill: 9999px;
+  --shadow-card: 0 1px 3px rgba(15,23,41,0.05), 0 0 0 1px rgba(15,23,41,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15,23,41,0.07), 0 2px 4px -2px rgba(15,23,41,0.05);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1); --dur: 200ms;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body {
+  font-family: var(--font); font-size: var(--text-base); line-height: 1.6;
+  color: var(--fg); background: var(--bg); min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--sp-8);
+}
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Focus — visible keyboard ring, hidden for mouse */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+}
+
+.container { max-width: 720px; width: 100%; text-align: center; }
+
+.brand {
+  display: inline-flex; align-items: center; gap: var(--sp-3);
+  margin-bottom: var(--sp-10);
+}
+.brand-mark {
+  width: 44px; height: 44px; background: var(--primary); border-radius: var(--r-sm);
+  display: grid; place-items: center; color: white; font-weight: 800; font-size: 18px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.brand-text { text-align: left; line-height: 1.15; }
+.brand-name { font-size: 18px; font-weight: 700; color: var(--fg); }
+.brand-sub { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+h1 {
+  font-size: var(--text-4xl); font-weight: 700; letter-spacing: -0.035em;
+  line-height: 1.08; margin-bottom: var(--sp-4);
+}
+h1 em { font-style: normal; color: var(--primary); }
+.subtitle {
+  font-size: var(--text-lg); color: var(--muted); max-width: 520px;
+  margin: 0 auto var(--sp-12); line-height: 1.6;
+}
+
+.screen-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-5);
+  margin-bottom: var(--sp-10); text-align: left;
+}
+.screen-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: var(--sp-6); box-shadow: var(--shadow-card);
+  transition: all var(--dur) var(--ease); text-decoration: none; color: var(--fg);
+  display: block;
+}
+.screen-card:hover {
+  border-color: var(--primary); box-shadow: var(--shadow-md);
+  transform: translateY(-2px); text-decoration: none;
+}
+.screen-icon {
+  width: 40px; height: 40px; border-radius: var(--r-md);
+  display: grid; place-items: center; margin-bottom: var(--sp-4);
+}
+.screen-icon svg {
+  width: 20px; height: 20px; stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.screen-icon-blue { background: var(--primary-soft); color: var(--primary); }
+.screen-icon-green { background: var(--accent-soft); color: var(--accent); }
+.screen-icon-slate { background: #f1f5f9; color: #475569; }
+.screen-card h3 {
+  font-size: var(--text-base); font-weight: 700; margin-bottom: var(--sp-2);
+}
+.screen-card p {
+  font-size: var(--text-sm); color: var(--muted); line-height: 1.5;
+}
+.screen-card-arrow {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--text-xs); font-weight: 600; color: var(--primary);
+  margin-top: var(--sp-4);
+}
+.screen-card-arrow svg {
+  width: 14px; height: 14px; stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform var(--dur) var(--ease);
+}
+.screen-card:hover .screen-card-arrow svg {
+  transform: translateX(3px);
+}
+
+.tokens-section {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: var(--sp-8); text-align: left; box-shadow: var(--shadow-card);
+  margin-bottom: var(--sp-8);
+}
+.tokens-title {
+  font-size: var(--text-sm); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--meta); margin-bottom: var(--sp-5);
+}
+.token-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--sp-4);
+}
+.token-item { display: flex; align-items: center; gap: var(--sp-3); }
+.token-swatch {
+  width: 28px; height: 28px; border-radius: var(--r-sm); flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.token-label { font-size: var(--text-xs); font-weight: 600; color: var(--fg); }
+.token-value { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--meta); }
+
+.footer-note {
+  font-size: var(--text-xs); color: var(--meta); margin-top: var(--sp-4);
+}
+
+@media (max-width: 768px) {
+  .screen-grid { grid-template-columns: 1fr; }
+  h1 { font-size: var(--text-3xl); }
+  .token-grid { grid-template-columns: 1fr 1fr; overflow: hidden; }
+  .container { padding: 0 var(--sp-4); }
+  body { padding: var(--sp-6); }
+}
+@media (max-width: 480px) {
+  h1 { font-size: var(--text-2xl); }
+  .token-grid { grid-template-columns: 1fr; }
+  .brand { margin-bottom: var(--sp-6); }
+  .subtitle { margin-bottom: var(--sp-8); }
+}
+</style>
+</head>
+<body>
+
+<main class="container" role="main" data-od-id="main">
+  <div class="brand" data-od-id="brand">
+    <div class="brand-mark" aria-hidden="true">TQ</div>
+    <div class="brand-text">
+      <div class="brand-name">Tech Quarters</div>
+      <div class="brand-sub">Funnel ChatBot</div>
+    </div>
+  </div>
+
+  <h1 data-od-id="headline">AI funnel qualification, packaged for <em>repeatable</em> client deployments.</h1>
+  <p class="subtitle" data-od-id="subtitle">
+    A reusable funnel operator that qualifies visitors, extracts buying signals, scores intent with deterministic rules, and routes qualified prospects to the right next step. Built once. Reconfigured per client.
+  </p>
+
+  <div class="screen-grid" data-od-id="screen-grid">
+    <a href="landing.html" class="screen-card" aria-label="View landing page design" data-od-id="card-landing">
+      <div class="screen-icon screen-icon-blue">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <h3>Landing Page</h3>
+      <p>Hero with pipeline preview, system value cards, 6-step qualification flow, client config layer, dashboard preview, and system architecture diagram.</p>
+      <span class="screen-card-arrow">
+        View landing page
+        <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </span>
+    </a>
+
+    <a href="dashboard.html" class="screen-card" aria-label="View dashboard design" data-od-id="card-dashboard">
+      <div class="screen-icon screen-icon-green">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </div>
+      <h3>Dashboard</h3>
+      <p>Operational funnel view: KPI cards, funnel steps with drop-off rates, score distribution, and recent conversations with score reasons and booking status.</p>
+      <span class="screen-card-arrow">
+        View dashboard
+        <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </span>
+    </a>
+
+    <a href="chat.html" class="screen-card" aria-label="View chat widget design" data-od-id="card-chat">
+      <div class="screen-icon screen-icon-slate">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      </div>
+      <h3>Chat Widget</h3>
+      <p>Funnel assistant with qualification flow, deterministic scoring, and intent-based route cards (high/medium/low) with appropriate next steps.</p>
+      <span class="screen-card-arrow">
+        View chat widget
+        <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </span>
+    </a>
+  </div>
+
+  <div class="tokens-section" data-od-id="tokens">
+    <div class="tokens-title">Design Tokens</div>
+    <div class="token-grid">
+      <div class="token-item">
+        <div class="token-swatch" style="background:#0b5fff;"></div>
+        <div><div class="token-label">Primary</div><div class="token-value">#0b5fff</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#00d4aa;"></div>
+        <div><div class="token-label">Accent</div><div class="token-value">#00d4aa</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#0f1729;"></div>
+        <div><div class="token-label">Text</div><div class="token-value">#0f1729</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#64748b;"></div>
+        <div><div class="token-label">Muted</div><div class="token-value">#64748b</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#f4f6f9;"></div>
+        <div><div class="token-label">Background</div><div class="token-value">#f4f6f9</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#ffffff; border-color:#e2e8f0;"></div>
+        <div><div class="token-label">Surface</div><div class="token-value">#ffffff</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#10b981;"></div>
+        <div><div class="token-label">Success</div><div class="token-value">#10b981</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#f59e0b;"></div>
+        <div><div class="token-label">Warning</div><div class="token-value">#f59e0b</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#ef4444;"></div>
+        <div><div class="token-label">Danger</div><div class="token-value">#ef4444</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#0c1929;"></div>
+        <div><div class="token-label">Dark Surface</div><div class="token-value">#0c1929</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#e2e8f0;"></div>
+        <div><div class="token-label">Border</div><div class="token-value">#e2e8f0</div></div>
+      </div>
+      <div class="token-item">
+        <div class="token-swatch" style="background:#e8f0ff;"></div>
+        <div><div class="token-label">Primary Soft</div><div class="token-value">#e8f0ff</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="footer-note">
+    Tech Quarters Funnel ChatBot · A reusable funnel operator for client sites · Built once, reconfigured per client
+  </p>
+</main>
+
+</body>
+</html>
